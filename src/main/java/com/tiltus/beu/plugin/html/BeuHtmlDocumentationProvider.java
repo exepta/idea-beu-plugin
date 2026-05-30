@@ -1,0 +1,318 @@
+package com.tiltus.beu.plugin.html;
+
+import com.intellij.lang.documentation.AbstractDocumentationProvider;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.util.Key;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.xml.XmlAttribute;
+import com.intellij.psi.xml.XmlAttributeValue;
+import com.intellij.psi.xml.XmlTag;
+import com.tiltus.beu.plugin.index.RustStructFieldIndex;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
+public final class BeuHtmlDocumentationProvider extends AbstractDocumentationProvider {
+    private static final Key<Integer> HOVER_OFFSET_KEY = Key.create("beu.hover.offset");
+
+    private static final class ObjectAccessContext {
+        private final String objectName;
+        private final String fieldName;
+        private final boolean hoveringObject;
+        private final boolean hoveringField;
+
+        private ObjectAccessContext(String objectName, String fieldName, boolean hoveringObject, boolean hoveringField) {
+            this.objectName = objectName;
+            this.fieldName = fieldName;
+            this.hoveringObject = hoveringObject;
+            this.hoveringField = hoveringField;
+        }
+    }
+
+    @Override
+    public String generateDoc(PsiElement element, PsiElement originalElement) {
+        String extraDoc = buildMergedExtraDoc(element, originalElement);
+        return (extraDoc == null || extraDoc.isBlank()) ? null : extraDoc;
+    }
+
+    @Override
+    public String generateHoverDoc(PsiElement element, PsiElement originalElement) {
+        String extraDoc = buildMergedExtraDoc(element, originalElement);
+        return (extraDoc == null || extraDoc.isBlank()) ? null : extraDoc;
+    }
+
+    @Override
+    public PsiElement getCustomDocumentationElement(Editor editor, PsiFile file, PsiElement contextElement, int targetOffset) {
+        if (file == null || !file.getName().toLowerCase(Locale.ROOT).endsWith(".html")) {
+            return null;
+        }
+        if (targetOffset < 0 || targetOffset >= file.getTextLength()) {
+            return null;
+        }
+
+        PsiElement target = file.findElementAt(targetOffset);
+        if (target == null) {
+            return null;
+        }
+        markOffsetOnAncestors(target, file, targetOffset);
+
+        XmlAttribute attribute = findAttribute(target);
+        if (attribute != null) {
+            XmlTag tag = attribute.getParent();
+            String tagName = tag == null ? null : tag.getName();
+            if (BeuHtmlEvents.isSupportedForTag(attribute.getName(), tagName)
+                    || BeuHtmlWidgets.isSupportedAttribute(attribute.getName(), tagName)) {
+                return target;
+            }
+            return null;
+        }
+
+        if (PsiTreeUtil.getParentOfType(target, XmlAttributeValue.class, false) != null) {
+            return null;
+        }
+
+        return objectAccessContextAt(file.getText(), targetOffset) != null ? target : null;
+    }
+
+    private static String buildMergedExtraDoc(PsiElement element, PsiElement originalElement) {
+        List<String> sections = new ArrayList<>();
+        String beuSection = buildBeuSection(element);
+        if (beuSection == null && originalElement != null) {
+            beuSection = buildBeuSection(originalElement);
+        }
+        if (beuSection != null) {
+            sections.add(beuSection);
+        }
+
+        String rustSection = null;
+        if (originalElement != null) {
+            rustSection = buildRustSection(originalElement);
+        }
+        if (rustSection == null && element != null) {
+            rustSection = buildRustSection(element);
+        }
+        if (rustSection != null) {
+            sections.add(rustSection);
+        }
+
+        if (sections.isEmpty()) {
+            return null;
+        }
+        return String.join("<hr/>", sections);
+    }
+
+    private static String buildBeuSection(PsiElement element) {
+        XmlAttribute attribute = findAttribute(element);
+        if (attribute == null) {
+            return null;
+        }
+
+        XmlTag tag = attribute.getParent();
+        String tagName = tag == null ? null : tag.getName();
+
+        BeuHtmlEvents.EventDefinition definition = BeuHtmlEvents.resolve(attribute.getName());
+        if (definition != null) {
+            if (definition.formOnly() && (tagName == null || !"form".equalsIgnoreCase(tagName))) {
+                return null;
+            }
+
+            String description = definition.description();
+            if (!definition.aliases().isEmpty()) {
+                description = description + " Aliases: " + String.join(", ", definition.aliases()) + ".";
+            }
+            return "<p><b>beu:</b></p><ul><li>" + description + "</li></ul>";
+        }
+
+        BeuHtmlWidgets.AttributeDefinition widgetAttribute = BeuHtmlWidgets.resolveAttribute(attribute.getName(), tagName);
+        if (widgetAttribute == null) {
+            return null;
+        }
+        return "<p><b>beu:</b></p><ul><li>" + widgetAttribute.description() + "</li></ul>";
+    }
+
+    private static String buildRustSection(PsiElement element) {
+        if (element == null || element.getTextRange() == null) {
+            return null;
+        }
+        if (findAttribute(element) != null) {
+            return null;
+        }
+
+        PsiFile file = element.getContainingFile();
+        if (file == null) {
+            return null;
+        }
+        if (!file.getName().toLowerCase(Locale.ROOT).endsWith(".html")) {
+            return null;
+        }
+
+        String text = file.getText();
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+
+        Integer markedOffset = element.getUserData(HOVER_OFFSET_KEY);
+        int offset = markedOffset != null ? markedOffset : element.getTextRange().getStartOffset();
+        ObjectAccessContext context = objectAccessContextAt(text, offset);
+        if (context == null) {
+            return null;
+        }
+
+        RustStructFieldIndex index = RustStructFieldIndex.get(file.getProject());
+        String fromUse = BeuHtmlUseResolver.resolveStructNameFromUse(file, context.objectName);
+        String preferredStructName = fromUse != null ? fromUse : BeuHtmlUseResolver.resolveStructName(file, context.objectName);
+        String structName = index.resolveStructNameForObject(context.objectName, preferredStructName, false);
+        if (structName == null) {
+            structName = index.resolveStructNameForObject(context.objectName, preferredStructName, true);
+        }
+        if (structName == null) {
+            return null;
+        }
+
+        if (context.hoveringField && context.fieldName != null) {
+            String fieldDoc = index.fieldDocForStructAndField(structName, context.fieldName);
+            if (fieldDoc != null && !fieldDoc.isBlank()) {
+                return "<p><b>rust:</b></p><ul><li>" + escapeHtml(fieldDoc).replace("\n", "<br/>") + "</li></ul>";
+            }
+        }
+
+        if (context.hoveringObject) {
+            String structDoc = index.structDocForStructName(structName);
+            if (structDoc != null && !structDoc.isBlank()) {
+                return "<p><b>rust:</b></p><ul><li>" + escapeHtml(structDoc).replace("\n", "<br/>") + "</li></ul>";
+            }
+        }
+
+        return null;
+    }
+
+    @Override
+    public String getQuickNavigateInfo(PsiElement element, PsiElement originalElement) {
+        XmlAttribute attribute = findAttribute(element);
+        if (attribute == null) {
+            return null;
+        }
+
+        XmlTag tag = attribute.getParent();
+        String tagName = tag == null ? null : tag.getName();
+        BeuHtmlEvents.EventDefinition definition = BeuHtmlEvents.resolve(attribute.getName());
+        if (definition != null) {
+            return definition.name() + ": " + definition.description();
+        }
+
+        BeuHtmlWidgets.AttributeDefinition widgetAttribute = BeuHtmlWidgets.resolveAttribute(attribute.getName(), tagName);
+        if (widgetAttribute != null) {
+            return widgetAttribute.name() + ": " + widgetAttribute.description();
+        }
+        return null;
+    }
+
+    private static XmlAttribute findAttribute(PsiElement element) {
+        if (element instanceof XmlAttribute xmlAttribute) {
+            return xmlAttribute;
+        }
+        return PsiTreeUtil.getParentOfType(element, XmlAttribute.class, false);
+    }
+
+    private static String escapeHtml(String raw) {
+        return raw
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
+    }
+
+    private static ObjectAccessContext objectAccessContextAt(String text, int rawOffset) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+
+        int offset = Math.min(Math.max(rawOffset, 0), text.length() - 1);
+        if (!isIdentifierChar(text.charAt(offset))) {
+            if (offset > 0 && isIdentifierChar(text.charAt(offset - 1))) {
+                offset--;
+            } else {
+                return null;
+            }
+        }
+
+        int tokenStart = offset;
+        while (tokenStart > 0 && isIdentifierChar(text.charAt(tokenStart - 1))) {
+            tokenStart--;
+        }
+
+        int tokenEnd = offset + 1;
+        while (tokenEnd < text.length() && isIdentifierChar(text.charAt(tokenEnd))) {
+            tokenEnd++;
+        }
+
+        String token = text.substring(tokenStart, tokenEnd);
+        int left = skipWhitespaceLeft(text, tokenStart - 1);
+        int right = skipWhitespaceRight(text, tokenEnd);
+
+        boolean hasLeftDot = left >= 0 && text.charAt(left) == '.';
+        boolean hasRightDot = right < text.length() && text.charAt(right) == '.';
+
+        if (hasLeftDot) {
+            int objectEnd = skipWhitespaceLeft(text, left - 1);
+            if (objectEnd < 0 || !isIdentifierChar(text.charAt(objectEnd))) {
+                return null;
+            }
+
+            int objectStart = objectEnd;
+            while (objectStart > 0 && isIdentifierChar(text.charAt(objectStart - 1))) {
+                objectStart--;
+            }
+
+            String objectName = text.substring(objectStart, objectEnd + 1);
+            return new ObjectAccessContext(objectName, token, false, true);
+        }
+
+        if (hasRightDot) {
+            int fieldStart = skipWhitespaceRight(text, right + 1);
+            if (fieldStart >= text.length() || !isIdentifierChar(text.charAt(fieldStart))) {
+                return new ObjectAccessContext(token, null, true, false);
+            }
+
+            int fieldEnd = fieldStart + 1;
+            while (fieldEnd < text.length() && isIdentifierChar(text.charAt(fieldEnd))) {
+                fieldEnd++;
+            }
+
+            String fieldName = text.substring(fieldStart, fieldEnd);
+            return new ObjectAccessContext(token, fieldName, true, false);
+        }
+
+        return null;
+    }
+
+    private static int skipWhitespaceLeft(String text, int start) {
+        int index = start;
+        while (index >= 0 && Character.isWhitespace(text.charAt(index))) {
+            index--;
+        }
+        return index;
+    }
+
+    private static int skipWhitespaceRight(String text, int start) {
+        int index = Math.max(0, start);
+        while (index < text.length() && Character.isWhitespace(text.charAt(index))) {
+            index++;
+        }
+        return index;
+    }
+
+    private static boolean isIdentifierChar(char ch) {
+        return ch == '_' || Character.isLetterOrDigit(ch);
+    }
+
+    private static void markOffsetOnAncestors(PsiElement target, PsiFile file, int targetOffset) {
+        PsiElement current = target;
+        while (current != null && current != file) {
+            current.putUserData(HOVER_OFFSET_KEY, targetOffset);
+            current = current.getParent();
+        }
+    }
+}

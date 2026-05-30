@@ -1,0 +1,29 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.intellij.platform'
+}
+
+group = 'com.tiltus.beu.parser'
+version = '1.0.16'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+dependencies {
+    intellijPlatform {
+        rustRover('2026.1')
+    }
+}
+
+intellijPlatform {
+    pluginConfiguration {
+        name = 'Bevy HTML Support'
+
+        ideaVersion {
+            sinceBuild = '261'
+        }
+    }
+}

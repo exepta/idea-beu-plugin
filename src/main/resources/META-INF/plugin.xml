@@ -1,0 +1,24 @@
+<idea-plugin>
+    <id>com.tiltus.beu.parser</id>
+    <name>Bevy HTML Support</name>
+    <vendor email="genshin.exepta@outlook.com" url="http://tilt-us.com/libraries/docs/bevy_extended_ui/">Tiltus</vendor>
+
+    <description><![CDATA[
+        Support for Bevy Extended UI HTML files.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.xml</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <annotator language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlAnnotator"/>
+        <completion.contributor language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlCompletionContributor"/>
+        <lang.documentationProvider language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlDocumentationProvider"/>
+        <postFormatProcessor implementationClass="com.tiltus.beu.plugin.format.BeuDirectivePostFormatProcessor" order="last"/>
+        <typedHandler implementationClass="com.tiltus.beu.plugin.format.BeuDirectiveTypedHandler"/>
+        <enterHandlerDelegate implementationClass="com.tiltus.beu.plugin.format.BeuDirectiveEnterHandler"/>
+        <copyPastePreProcessor implementationClass="com.tiltus.beu.plugin.format.BeuDirectiveCopyPastePreProcessor"/>
+        <psi.referenceContributor language="HTML" implementation="com.tiltus.beu.plugin.references.BeuHtmlFnReferenceContributor"/>
+        <lang.inspectionSuppressor language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlInspectionSuppressor"/>
+    </extensions>
+</idea-plugin>
