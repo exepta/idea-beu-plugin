@@ -8,6 +8,7 @@
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
     <depends>com.intellij.modules.xml</depends>
 
     <extensions defaultExtensionNs="com.intellij">
@@ -20,5 +21,18 @@
         <copyPastePreProcessor implementationClass="com.tiltus.beu.plugin.format.BeuDirectiveCopyPastePreProcessor"/>
         <psi.referenceContributor language="HTML" implementation="com.tiltus.beu.plugin.references.BeuHtmlFnReferenceContributor"/>
         <lang.inspectionSuppressor language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlInspectionSuppressor"/>
+        <directoryProjectGenerator implementation="com.tiltus.beu.plugin.project.BevyDirectoryProjectGenerator"/>
+        <newProjectWizard.languageGenerator implementation="com.tiltus.beu.plugin.project.BevyNewProjectWizard"/>
     </extensions>
+
+    <actions>
+        <action
+                id="com.tiltus.beu.plugin.actions.NewBeuComponentAction"
+                class="com.tiltus.beu.plugin.actions.NewBeuComponentAction"
+                text="Beu Component"
+                icon="/icons/beuComponentPlus.svg"
+                description="Create a beu component">
+            <add-to-group group-id="NewGroup" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>
