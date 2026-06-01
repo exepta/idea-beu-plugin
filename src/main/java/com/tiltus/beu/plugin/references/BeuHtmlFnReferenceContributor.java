@@ -27,12 +27,12 @@ public final class BeuHtmlFnReferenceContributor extends PsiReferenceContributor
                     return com.intellij.psi.PsiReference.EMPTY_ARRAY;
                 }
 
-                String fnName = attributeValue.getValue();
-                if (fnName == null || fnName.isBlank()) {
+                String functionName = attributeValue.getValue();
+                if (functionName == null || functionName.isBlank()) {
                     return com.intellij.psi.PsiReference.EMPTY_ARRAY;
                 }
 
-                return new com.intellij.psi.PsiReference[]{new BeuHtmlFnReference(attributeValue, fnName)};
+                return new com.intellij.psi.PsiReference[]{new BeuHtmlFnReference(attributeValue, functionName)};
             }
         });
     }

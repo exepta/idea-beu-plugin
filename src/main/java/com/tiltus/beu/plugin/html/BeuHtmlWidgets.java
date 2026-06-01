@@ -172,8 +172,8 @@ final class BeuHtmlWidgets {
         TAGS.add(normalizedTag);
     }
 
-    private static AttributeDefinition attr(String name, String description) {
-        return new AttributeDefinition(normalize(name), description);
+    private static AttributeDefinition attr(String attributeName, String description) {
+        return new AttributeDefinition(normalize(attributeName), description);
     }
 
     static boolean isKnownTag(String tagName) {
@@ -213,8 +213,8 @@ final class BeuHtmlWidgets {
         return definition.attribute(normalize(attributeName));
     }
 
-    private static String normalize(String value) {
-        return value.toLowerCase(Locale.ROOT).trim();
+    private static String normalize(String input) {
+        return input.toLowerCase(Locale.ROOT).trim();
     }
 
     private BeuHtmlWidgets() {

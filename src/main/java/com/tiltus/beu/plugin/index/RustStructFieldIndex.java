@@ -27,7 +27,7 @@ public final class RustStructFieldIndex {
         return RustBeuIndex.get(project).fieldDocForStructAndField(structName, fieldName);
     }
 
-    public String resolveStructNameForObject(String objectName, String preferredStructName, boolean allowDeepPreferredLookup) {
-        return RustBeuIndex.get(project).resolveStructNameForObject(objectName, preferredStructName, allowDeepPreferredLookup);
+    public String resolveStructNameForObject(String objectName, String preferredStructName, boolean allowDeepSearch) {
+        return RustBeuIndex.get(project).resolveStructNameForObject(objectName, preferredStructName, allowDeepSearch);
     }
 }

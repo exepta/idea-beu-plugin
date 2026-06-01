@@ -34,14 +34,14 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
 
     @Override
     public String generateDoc(PsiElement element, PsiElement originalElement) {
-        String extraDoc = buildMergedExtraDoc(element, originalElement);
-        return (extraDoc == null || extraDoc.isBlank()) ? null : extraDoc;
+        String mergedDocumentation = buildMergedExtraDoc(element, originalElement);
+        return (mergedDocumentation == null || mergedDocumentation.isBlank()) ? null : mergedDocumentation;
     }
 
     @Override
     public String generateHoverDoc(PsiElement element, PsiElement originalElement) {
-        String extraDoc = buildMergedExtraDoc(element, originalElement);
-        return (extraDoc == null || extraDoc.isBlank()) ? null : extraDoc;
+        String mergedDocumentation = buildMergedExtraDoc(element, originalElement);
+        return (mergedDocumentation == null || mergedDocumentation.isBlank()) ? null : mergedDocumentation;
     }
 
     @Override
@@ -79,23 +79,23 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
 
     private static String buildMergedExtraDoc(PsiElement element, PsiElement originalElement) {
         List<String> sections = new ArrayList<>();
-        String beuSection = buildBeuSection(element);
-        if (beuSection == null && originalElement != null) {
-            beuSection = buildBeuSection(originalElement);
+        String beuDocumentationSection = buildBeuSection(element);
+        if (beuDocumentationSection == null && originalElement != null) {
+            beuDocumentationSection = buildBeuSection(originalElement);
         }
-        if (beuSection != null) {
-            sections.add(beuSection);
+        if (beuDocumentationSection != null) {
+            sections.add(beuDocumentationSection);
         }
 
-        String rustSection = null;
+        String rustDocumentationSection = null;
         if (originalElement != null) {
-            rustSection = buildRustSection(originalElement);
+            rustDocumentationSection = buildRustSection(originalElement);
         }
-        if (rustSection == null && element != null) {
-            rustSection = buildRustSection(element);
+        if (rustDocumentationSection == null && element != null) {
+            rustDocumentationSection = buildRustSection(element);
         }
-        if (rustSection != null) {
-            sections.add(rustSection);
+        if (rustDocumentationSection != null) {
+            sections.add(rustDocumentationSection);
         }
 
         if (sections.isEmpty()) {
@@ -217,8 +217,8 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
         return PsiTreeUtil.getParentOfType(element, XmlAttribute.class, false);
     }
 
-    private static String escapeHtml(String raw) {
-        return raw
+    private static String escapeHtml(String rawText) {
+        return rawText
                 .replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;");
@@ -308,11 +308,11 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
         return ch == '_' || Character.isLetterOrDigit(ch);
     }
 
-    private static void markOffsetOnAncestors(PsiElement target, PsiFile file, int targetOffset) {
-        PsiElement current = target;
-        while (current != null && current != file) {
-            current.putUserData(HOVER_OFFSET_KEY, targetOffset);
-            current = current.getParent();
+    private static void markOffsetOnAncestors(PsiElement leafElement, PsiFile file, int targetOffset) {
+        PsiElement currentElement = leafElement;
+        while (currentElement != null && currentElement != file) {
+            currentElement.putUserData(HOVER_OFFSET_KEY, targetOffset);
+            currentElement = currentElement.getParent();
         }
     }
 }

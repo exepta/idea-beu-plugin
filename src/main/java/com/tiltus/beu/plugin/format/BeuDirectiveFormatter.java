@@ -17,18 +17,18 @@ final class BeuDirectiveFormatter {
     }
 
     static String reindentDirectiveBlocks(String text) {
-        String[] lines = text.split("\n", -1);
+        String[] textLines = text.split("\n", -1);
         StringBuilder result = new StringBuilder(text.length() + 16);
-        Deque<Integer> blockBaseIndent = new ArrayDeque<>();
+        Deque<Integer> blockBaseIndents = new ArrayDeque<>();
 
-        for (int i = 0; i < lines.length; i++) {
-            String line = lines[i];
+        for (int i = 0; i < textLines.length; i++) {
+            String line = textLines[i];
             String trimmedLeft = trimLeading(line);
             String trimmed = trimmedLeft.trim();
             String rewritten = line;
 
-            if (!trimmed.isEmpty() && !blockBaseIndent.isEmpty()) {
-                int expectedIndent = startsWithClosingBrace(trimmed) ? blockBaseIndent.peek() : blockBaseIndent.peek() + 4;
+            if (!trimmed.isEmpty() && !blockBaseIndents.isEmpty()) {
+                int expectedIndent = startsWithClosingBrace(trimmed) ? blockBaseIndents.peek() : blockBaseIndents.peek() + 4;
                 rewritten = " ".repeat(Math.max(0, expectedIndent)) + trimmed;
             }
 
@@ -46,12 +46,12 @@ final class BeuDirectiveFormatter {
                 continue;
             }
 
-            if (startsWithClosingBrace(trimmed) && !blockBaseIndent.isEmpty()) {
-                blockBaseIndent.pop();
+            if (startsWithClosingBrace(trimmed) && !blockBaseIndents.isEmpty()) {
+                blockBaseIndents.pop();
             }
 
             if (isDirectiveOpen(trimmed) || isElseOpen(trimmed)) {
-                blockBaseIndent.push(currentIndent);
+                blockBaseIndents.push(currentIndent);
             }
         }
 
@@ -61,7 +61,7 @@ final class BeuDirectiveFormatter {
     static int computeInnerIndentBeforeOffset(Document document, int offset) {
         int safeOffset = Math.max(0, Math.min(offset, document.getTextLength()));
         int caretLine = document.getLineNumber(safeOffset);
-        Deque<Integer> blockBaseIndent = new ArrayDeque<>();
+        Deque<Integer> blockBaseIndents = new ArrayDeque<>();
 
         for (int line = 0; line <= caretLine; line++) {
             int lineStart = document.getLineStartOffset(line);
@@ -81,16 +81,16 @@ final class BeuDirectiveFormatter {
                 continue;
             }
 
-            if (startsWithClosingBrace(trimmed) && !blockBaseIndent.isEmpty()) {
-                blockBaseIndent.pop();
+            if (startsWithClosingBrace(trimmed) && !blockBaseIndents.isEmpty()) {
+                blockBaseIndents.pop();
             }
 
             if (isDirectiveOpen(trimmed) || isElseOpen(trimmed)) {
-                blockBaseIndent.push(currentIndent);
+                blockBaseIndents.push(currentIndent);
             }
         }
 
-        return blockBaseIndent.isEmpty() ? -1 : blockBaseIndent.peek() + 4;
+        return blockBaseIndents.isEmpty() ? -1 : blockBaseIndents.peek() + 4;
     }
 
     static String applyBaseIndent(String text, int baseIndent) {

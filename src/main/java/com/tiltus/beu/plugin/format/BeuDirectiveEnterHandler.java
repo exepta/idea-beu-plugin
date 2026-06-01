@@ -15,7 +15,7 @@ import org.jetbrains.annotations.NotNull;
 import java.util.Locale;
 
 public final class BeuDirectiveEnterHandler extends EnterHandlerDelegateAdapter {
-    private static final Key<Integer> INDENT_SIZE = Key.create("beu.directive.enter.indent.size");
+    private static final Key<Integer> ENTER_INDENT_SIZE_KEY = Key.create("beu.directive.enter.indent.size");
 
     @Override
     public @NotNull EnterHandlerDelegate.Result preprocessEnter(
@@ -26,14 +26,14 @@ public final class BeuDirectiveEnterHandler extends EnterHandlerDelegateAdapter 
             @NotNull DataContext dataContext,
             EditorActionHandler originalHandler
     ) {
-        editor.putUserData(INDENT_SIZE, computeIndentAfterEnter(file, editor, caretOffset.get()));
+        editor.putUserData(ENTER_INDENT_SIZE_KEY, computeIndentAfterEnter(file, editor, caretOffset.get()));
         return EnterHandlerDelegate.Result.Continue;
     }
 
     @Override
     public @NotNull EnterHandlerDelegate.Result postProcessEnter(@NotNull PsiFile file, @NotNull Editor editor, @NotNull DataContext dataContext) {
-        Integer indentSize = editor.getUserData(INDENT_SIZE);
-        editor.putUserData(INDENT_SIZE, null);
+        Integer indentSize = editor.getUserData(ENTER_INDENT_SIZE_KEY);
+        editor.putUserData(ENTER_INDENT_SIZE_KEY, null);
         if (indentSize == null || indentSize < 0) {
             return EnterHandlerDelegate.Result.Continue;
         }
@@ -53,7 +53,7 @@ public final class BeuDirectiveEnterHandler extends EnterHandlerDelegateAdapter 
         return EnterHandlerDelegate.Result.Stop;
     }
 
-    private static Integer computeIndentAfterEnter(PsiFile file, Editor editor, int offset) {
+    private static int computeIndentAfterEnter(PsiFile file, Editor editor, int offset) {
         if (!file.getName().toLowerCase(Locale.ROOT).endsWith(".html")) {
             return -1;
         }

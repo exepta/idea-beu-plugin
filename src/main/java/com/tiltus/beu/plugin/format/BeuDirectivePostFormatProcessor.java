@@ -33,18 +33,18 @@ public final class BeuDirectivePostFormatProcessor implements PostFormatProcesso
             return rangeToReformat;
         }
 
-        String original = document.getText();
-        if (!BeuDirectiveFormatter.containsDirectives(original)) {
+        String originalText = document.getText();
+        if (!BeuDirectiveFormatter.containsDirectives(originalText)) {
             return rangeToReformat;
         }
 
-        String formatted = BeuDirectiveFormatter.reindentDirectiveBlocks(original);
-        if (original.equals(formatted)) {
+        String formattedText = BeuDirectiveFormatter.reindentDirectiveBlocks(originalText);
+        if (originalText.equals(formattedText)) {
             return rangeToReformat;
         }
 
-        document.setText(formatted);
+        document.setText(formattedText);
         PsiDocumentManager.getInstance(source.getProject()).commitDocument(document);
-        return new TextRange(0, formatted.length());
+        return new TextRange(0, formattedText.length());
     }
 }

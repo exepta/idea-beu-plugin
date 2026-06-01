@@ -39,8 +39,8 @@ final class BeuHtmlFnReference extends PsiReferenceBase<XmlAttributeValue> {
 
     private static TextRange rangeForValue(XmlAttributeValue value) {
         TextRange valueRange = value.getValueTextRange();
-        int start = valueRange.getStartOffset() - value.getTextRange().getStartOffset();
-        return TextRange.from(start, valueRange.getLength());
+        int relativeStartOffset = valueRange.getStartOffset() - value.getTextRange().getStartOffset();
+        return TextRange.from(relativeStartOffset, valueRange.getLength());
     }
 
     private PsiElement resolveTarget(RustBeuIndex.HtmlFunctionTarget target) {
@@ -48,9 +48,9 @@ final class BeuHtmlFnReference extends PsiReferenceBase<XmlAttributeValue> {
         if (psiFile == null) {
             return null;
         }
-        PsiElement direct = psiFile.findElementAt(target.offset());
-        if (direct != null) {
-            return direct;
+        PsiElement targetElement = psiFile.findElementAt(target.offset());
+        if (targetElement != null) {
+            return targetElement;
         }
         return psiFile;
     }

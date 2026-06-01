@@ -35,12 +35,12 @@ public final class BeuHtmlAnnotator implements Annotator {
             return;
         }
 
-        String text = psiFile.getText();
-        if (text == null || text.isEmpty() || (!text.contains("@") && !text.contains("."))) {
+        String fileText = psiFile.getText();
+        if (fileText == null || fileText.isEmpty() || (!fileText.contains("@") && !fileText.contains("."))) {
             return;
         }
 
-        annotateInlineText(text, 0, holder);
+        annotateInlineText(fileText, 0, holder);
     }
 
     private static void annotateInlineText(String text, int startOffset, AnnotationHolder holder) {
@@ -104,10 +104,15 @@ public final class BeuHtmlAnnotator implements Annotator {
         );
     }
 
-    private static void annotateRange(AnnotationHolder holder, int start, int end, com.intellij.openapi.editor.colors.TextAttributesKey key) {
+    private static void annotateRange(
+            AnnotationHolder holder,
+            int startOffset,
+            int endOffset,
+            com.intellij.openapi.editor.colors.TextAttributesKey textAttributesKey
+    ) {
         holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                .range(TextRange.create(start, end))
-                .textAttributes(key)
+                .range(TextRange.create(startOffset, endOffset))
+                .textAttributes(textAttributesKey)
                 .create();
     }
 }

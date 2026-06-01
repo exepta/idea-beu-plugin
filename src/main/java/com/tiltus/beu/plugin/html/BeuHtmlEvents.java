@@ -118,8 +118,8 @@ public final class BeuHtmlEvents {
         return normalized.startsWith("on") || "action".equals(normalized);
     }
 
-    private static String normalize(String value) {
-        return value.toLowerCase(Locale.ROOT).trim();
+    private static String normalize(String input) {
+        return input.toLowerCase(Locale.ROOT).trim();
     }
 
     private BeuHtmlEvents() {

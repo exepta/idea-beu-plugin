@@ -26,13 +26,13 @@ public final class BeuDirectiveCopyPastePreProcessor implements CopyPastePreProc
             return text;
         }
 
-        String normalized = BeuDirectiveFormatter.reindentDirectiveBlocks(text);
+        String reindentedText = BeuDirectiveFormatter.reindentDirectiveBlocks(text);
         int caretOffset = editor.getCaretModel().getOffset();
         int indent = BeuDirectiveFormatter.computeInnerIndentBeforeOffset(editor.getDocument(), caretOffset);
         if (indent < 0) {
             indent = BeuDirectiveFormatter.currentLineIndent(editor.getDocument(), caretOffset);
         }
 
-        return BeuDirectiveFormatter.applyBaseIndent(normalized, Math.max(0, indent));
+        return BeuDirectiveFormatter.applyBaseIndent(reindentedText, Math.max(0, indent));
     }
 }

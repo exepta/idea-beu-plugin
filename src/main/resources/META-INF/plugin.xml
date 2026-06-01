@@ -4,7 +4,12 @@
     <vendor email="genshin.exepta@outlook.com" url="http://tilt-us.com/libraries/docs/bevy_extended_ui/">Tiltus</vendor>
 
     <description><![CDATA[
-        Support for Bevy Extended UI HTML files.
+        <p>RustRover plugin for Bevy and bevy_extended_ui workflows.</p>
+        <ul>
+            <li>Bevy New Project Wizard with version, feature, and asset selection.</li>
+            <li>Beu Component action in the project tree context menu.</li>
+            <li>HTML support for bevy_extended_ui templates (completion, docs, inspections, formatting).</li>
+        </ul>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>

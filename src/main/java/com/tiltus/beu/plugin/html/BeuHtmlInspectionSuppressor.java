@@ -20,7 +20,7 @@ public final class BeuHtmlInspectionSuppressor implements InspectionSuppressor {
     public boolean isSuppressedFor(@NotNull PsiElement element, @NotNull String toolId) {
         if (HTML_UNKNOWN_TAG.equals(toolId)) {
             XmlTag tag = PsiTreeUtil.getParentOfType(element, XmlTag.class, false);
-            return tag != null && isCustomTag(element, tag.getName());
+            return tag != null && isCustomTag(tag.getName());
         }
 
         if (HTML_UNKNOWN_ATTRIBUTE.equals(toolId)) {
@@ -55,7 +55,7 @@ public final class BeuHtmlInspectionSuppressor implements InspectionSuppressor {
         return new SuppressQuickFix[0];
     }
 
-    private static boolean isCustomTag(PsiElement element, String tagName) {
+    private static boolean isCustomTag(String tagName) {
         if (tagName == null || tagName.isBlank()) {
             return false;
         }

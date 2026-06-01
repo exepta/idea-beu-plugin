@@ -64,7 +64,7 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
     private static final List<String> FALLBACK_BEU_VERSIONS = List.of("0.1.0");
     private static final String BEU_MAIN_GIT_OPTION = "main (git)";
 
-    private final AtomicInteger pendingJobs = new AtomicInteger(0);
+    private final AtomicInteger pendingAsyncJobs = new AtomicInteger(0);
     private final Map<String, String> bevyTagByDisplay = new LinkedHashMap<>();
     private final Map<String, String> beuTagByDisplay = new LinkedHashMap<>();
     private final Map<String, JBCheckBox> featureCheckboxes = new LinkedHashMap<>();
@@ -89,7 +89,7 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
 
     private boolean suppressBeuVersionEvents;
     private boolean dataLoadingStarted;
-    private JPanel legacyComponentPanel;
+    private JPanel legacySettingsPanel;
 
     public BevyProjectGeneratorPeer() {
         featuresListPanel.setLayout(new BoxLayout(featuresListPanel, BoxLayout.Y_AXIS));
@@ -116,11 +116,11 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
 
     @Override
     public synchronized JComponent getComponent(@NotNull TextFieldWithBrowseButton locationField, @NotNull Runnable checkValid) {
-        if (legacyComponentPanel == null) {
-            legacyComponentPanel = new JPanel(new GridBagLayout());
-            buildUI(new LegacySettingsStepAdapter(legacyComponentPanel));
+        if (legacySettingsPanel == null) {
+            legacySettingsPanel = new JPanel(new GridBagLayout());
+            buildUI(new LegacySettingsStepAdapter(legacySettingsPanel));
         }
-        return legacyComponentPanel;
+        return legacySettingsPanel;
     }
 
     @Override
@@ -209,7 +209,7 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
 
     @Override
     public boolean isBackgroundJobRunning() {
-        return pendingJobs.get() > 0;
+        return pendingAsyncJobs.get() > 0;
     }
 
     private void loadRustVersion() {
@@ -229,11 +229,11 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
                         String display = normalizeCrateVersion(tag);
                         bevyTagByDisplay.putIfAbsent(display, tag);
                     }
-                    List<String> values = new ArrayList<>(bevyTagByDisplay.keySet());
-                    if (values.isEmpty()) {
-                        values = FALLBACK_BEVY_VERSIONS;
+                    List<String> availableVersions = new ArrayList<>(bevyTagByDisplay.keySet());
+                    if (availableVersions.isEmpty()) {
+                        availableVersions = FALLBACK_BEVY_VERSIONS;
                     }
-                    replaceComboValues(bevyVersionCombo, values);
+                    replaceComboValues(bevyVersionCombo, availableVersions);
                 },
                 error -> replaceComboValues(bevyVersionCombo, FALLBACK_BEVY_VERSIONS)
         );
@@ -248,14 +248,14 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
                         String display = normalizeCrateVersion(tag);
                         beuTagByDisplay.putIfAbsent(display, tag);
                     }
-                    List<String> values = new ArrayList<>(beuTagByDisplay.keySet());
-                    if (values.isEmpty()) {
-                        values = new ArrayList<>(FALLBACK_BEU_VERSIONS);
+                    List<String> availableVersions = new ArrayList<>(beuTagByDisplay.keySet());
+                    if (availableVersions.isEmpty()) {
+                        availableVersions = new ArrayList<>(FALLBACK_BEU_VERSIONS);
                     }
-                    values.add(0, BEU_MAIN_GIT_OPTION);
+                    availableVersions.add(0, BEU_MAIN_GIT_OPTION);
 
                     suppressBeuVersionEvents = true;
-                    replaceComboValues(beuVersionCombo, values);
+                    replaceComboValues(beuVersionCombo, availableVersions);
                     suppressBeuVersionEvents = false;
                     updateBeuControlsEnabled();
                     if (includeBeuCheckbox.isSelected()) {
@@ -304,8 +304,7 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
         runAsync(
                 () -> parseAssets(fetchText("https://bevy.org/assets/")),
                 assets -> {
-                    assetCheckboxes.clear();
-                    assetsCheckboxPanel.removeAll();
+                    clearAssetSelectionPanel();
                     for (AssetOption asset : assets) {
                         JBCheckBox checkBox = new JBCheckBox(asset.title(), false);
                         checkBox.setToolTipText(asset.url());
@@ -319,13 +318,17 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
                             : "Loaded " + assets.size() + " assets (select with checkbox).");
                 },
                 error -> {
-                    assetCheckboxes.clear();
-                    assetsCheckboxPanel.removeAll();
-                    assetsCheckboxPanel.revalidate();
-                    assetsCheckboxPanel.repaint();
+                    clearAssetSelectionPanel();
                     assetsStatusLabel.setText("Could not load assets from bevy.org.");
                 }
         );
+    }
+
+    private void clearAssetSelectionPanel() {
+        assetCheckboxes.clear();
+        assetsCheckboxPanel.removeAll();
+        assetsCheckboxPanel.revalidate();
+        assetsCheckboxPanel.repaint();
     }
 
     private void setFeatures(List<String> features) {
@@ -343,10 +346,10 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
 
         featuresStatusLabel.setVisible(false);
         for (String feature : features) {
-            JBCheckBox featureCheckBox = new JBCheckBox(feature, false);
-            featureCheckBox.addActionListener(event -> updateRegistryFieldState());
-            featureCheckboxes.put(feature, featureCheckBox);
-            featuresListPanel.add(featureCheckBox);
+            JBCheckBox featureCheckbox = new JBCheckBox(feature, false);
+            featureCheckbox.addActionListener(event -> updateRegistryFieldState());
+            featureCheckboxes.put(feature, featureCheckbox);
+            featuresListPanel.add(featureCheckbox);
         }
 
         featuresListPanel.revalidate();
@@ -416,12 +419,12 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
         return value;
     }
 
-    private static String selectedOrFallback(JComboBox<String> comboBox, String fallback) {
+    private static String selectedOrFallback(JComboBox<String> comboBox, String fallbackValue) {
         Object selected = comboBox.getSelectedItem();
         if (selected instanceof String value && !value.isBlank()) {
             return value;
         }
-        return fallback;
+        return fallbackValue;
     }
 
     private static void replaceComboValues(JComboBox<String> comboBox, List<String> values) {
@@ -437,12 +440,12 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
     }
 
     private <T> void runAsync(AsyncSupplier<T> supplier, Consumer<T> onSuccess, Consumer<Throwable> onError) {
-        pendingJobs.incrementAndGet();
+        pendingAsyncJobs.incrementAndGet();
         CompletableFuture.supplyAsync(() -> {
             try {
                 return supplier.get();
-            } catch (Exception error) {
-                throw new CompletionException(error);
+            } catch (Exception exception) {
+                throw new CompletionException(exception);
             }
         }).whenComplete((result, throwable) ->
                 ApplicationManager.getApplication().invokeLater(() -> {
@@ -453,7 +456,7 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
                             onError.accept(unwrapCompletion(throwable));
                         }
                     } finally {
-                        pendingJobs.decrementAndGet();
+                        pendingAsyncJobs.decrementAndGet();
                     }
                 }, ModalityState.any())
         );
@@ -532,29 +535,29 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
 
     private static List<AssetOption> parseAssets(String html) {
         List<AssetOption> assets = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
+        Set<String> seenAssets = new LinkedHashSet<>();
 
         Matcher cardMatcher = CARD_PATTERN.matcher(html);
         while (cardMatcher.find()) {
-            String cardHtml = cardMatcher.group();
-            Matcher titleMatcher = TITLE_PATTERN.matcher(cardHtml);
-            Matcher hrefMatcher = HREF_PATTERN.matcher(cardHtml);
+            String assetCardHtml = cardMatcher.group();
+            Matcher titleMatcher = TITLE_PATTERN.matcher(assetCardHtml);
+            Matcher hrefMatcher = HREF_PATTERN.matcher(assetCardHtml);
             if (!titleMatcher.find() || !hrefMatcher.find()) {
                 continue;
             }
 
             String title = cleanupHtmlText(titleMatcher.group(1));
-            String href = stripQuotes(hrefMatcher.group(1));
-            if (title.isBlank() || href.isBlank()) {
+            String assetUrlCandidate = stripQuotes(hrefMatcher.group(1));
+            if (title.isBlank() || assetUrlCandidate.isBlank()) {
                 continue;
             }
 
-            String normalizedUrl = normalizeAssetUrl(href);
+            String normalizedUrl = normalizeAssetUrl(assetUrlCandidate);
             if (!isSupportedDependencyUrl(normalizedUrl)) {
                 continue;
             }
-            String key = title + "|" + normalizedUrl;
-            if (seen.add(key)) {
+            String dedupKey = title + "|" + normalizedUrl;
+            if (seenAssets.add(dedupKey)) {
                 assets.add(new AssetOption(title, normalizedUrl));
             }
             if (assets.size() >= 300) {
@@ -581,21 +584,21 @@ public final class BevyProjectGeneratorPeer implements ProjectGeneratorPeer<Bevy
         }
     }
 
-    private static String cleanupHtmlText(String text) {
-        String withoutTags = text.replaceAll("<[^>]+>", " ");
+    private static String cleanupHtmlText(String htmlFragment) {
+        String withoutTags = htmlFragment.replaceAll("<[^>]+>", " ");
         String unescaped = StringUtil.unescapeXmlEntities(withoutTags);
         return unescaped.replaceAll("\\s+", " ").trim();
     }
 
-    private static String stripQuotes(String value) {
-        if (value.length() >= 2) {
-            char first = value.charAt(0);
-            char last = value.charAt(value.length() - 1);
+    private static String stripQuotes(String quotedValue) {
+        if (quotedValue.length() >= 2) {
+            char first = quotedValue.charAt(0);
+            char last = quotedValue.charAt(quotedValue.length() - 1);
             if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
-                return value.substring(1, value.length() - 1);
+                return quotedValue.substring(1, quotedValue.length() - 1);
             }
         }
-        return value;
+        return quotedValue;
     }
 
     private static String normalizeAssetUrl(String url) {

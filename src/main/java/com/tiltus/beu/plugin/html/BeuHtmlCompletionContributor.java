@@ -113,24 +113,24 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
     }
 
     private static void addRustStructFieldCompletions(CompletionParameters parameters, CompletionResultSet result) {
-        ObjectAccessPrefix access = objectAccessPrefix(parameters);
-        if (access == null) {
+        ObjectAccessPrefix objectAccess = objectAccessPrefix(parameters);
+        if (objectAccess == null) {
             return;
         }
 
         String htmlText = parameters.getEditor().getDocument().getText();
         RustStructFieldIndex index = RustStructFieldIndex.get(parameters.getOriginalFile().getProject());
-        String fromUse = BeuHtmlUseResolver.resolveStructNameFromUse(htmlText, access.objectName);
-        String preferredStructName = fromUse != null ? fromUse : BeuHtmlUseResolver.resolveStructName(htmlText, access.objectName);
-        String structName = index.resolveStructNameForObject(access.objectName, preferredStructName, false);
+        String fromUse = BeuHtmlUseResolver.resolveStructNameFromUse(htmlText, objectAccess.objectName);
+        String preferredStructName = fromUse != null ? fromUse : BeuHtmlUseResolver.resolveStructName(htmlText, objectAccess.objectName);
+        String structName = index.resolveStructNameForObject(objectAccess.objectName, preferredStructName, false);
         if (structName == null) {
-            structName = index.resolveStructNameForObject(access.objectName, preferredStructName, true);
+            structName = index.resolveStructNameForObject(objectAccess.objectName, preferredStructName, true);
         }
         if (structName == null || structName.isBlank()) {
             return;
         }
 
-        CompletionResultSet prefixedResult = result.withPrefixMatcher(access.fieldPrefix);
+        CompletionResultSet prefixedResult = result.withPrefixMatcher(objectAccess.fieldPrefix);
 
         List<String> fields = index.fieldsForStructName(structName);
         for (String field : fields) {
@@ -173,41 +173,41 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
     }
 
     private static ObjectAccessPrefix objectAccessPrefix(CompletionParameters parameters) {
-        CharSequence chars = parameters.getEditor().getDocument().getCharsSequence();
-        int caret = Math.min(parameters.getEditor().getCaretModel().getOffset(), chars.length());
-        if (caret <= 0) {
+        CharSequence documentChars = parameters.getEditor().getDocument().getCharsSequence();
+        int caretOffset = Math.min(parameters.getEditor().getCaretModel().getOffset(), documentChars.length());
+        if (caretOffset <= 0) {
             return null;
         }
 
-        int fieldEnd = caret;
+        int fieldEnd = caretOffset;
         int fieldStart = fieldEnd;
-        while (fieldStart > 0 && isIdentifierChar(chars.charAt(fieldStart - 1))) {
+        while (fieldStart > 0 && isIdentifierChar(documentChars.charAt(fieldStart - 1))) {
             fieldStart--;
         }
 
         int dotIndex = fieldStart - 1;
-        while (dotIndex >= 0 && Character.isWhitespace(chars.charAt(dotIndex))) {
+        while (dotIndex >= 0 && Character.isWhitespace(documentChars.charAt(dotIndex))) {
             dotIndex--;
         }
-        if (dotIndex < 0 || chars.charAt(dotIndex) != '.') {
+        if (dotIndex < 0 || documentChars.charAt(dotIndex) != '.') {
             return null;
         }
 
         int objectEnd = dotIndex - 1;
-        while (objectEnd >= 0 && Character.isWhitespace(chars.charAt(objectEnd))) {
+        while (objectEnd >= 0 && Character.isWhitespace(documentChars.charAt(objectEnd))) {
             objectEnd--;
         }
-        if (objectEnd < 0 || !isIdentifierChar(chars.charAt(objectEnd))) {
+        if (objectEnd < 0 || !isIdentifierChar(documentChars.charAt(objectEnd))) {
             return null;
         }
 
         int objectStart = objectEnd;
-        while (objectStart > 0 && isIdentifierChar(chars.charAt(objectStart - 1))) {
+        while (objectStart > 0 && isIdentifierChar(documentChars.charAt(objectStart - 1))) {
             objectStart--;
         }
 
-        String objectName = chars.subSequence(objectStart, objectEnd + 1).toString();
-        String fieldPrefix = chars.subSequence(fieldStart, fieldEnd).toString();
+        String objectName = documentChars.subSequence(objectStart, objectEnd + 1).toString();
+        String fieldPrefix = documentChars.subSequence(fieldStart, fieldEnd).toString();
         if (objectName.isBlank()) {
             return null;
         }
@@ -216,30 +216,30 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
 
     private static String tagPrefix(CompletionParameters parameters) {
         String prefixWindow = textBeforeCaret(parameters, 200);
-        int lt = Math.max(prefixWindow.lastIndexOf('<'), prefixWindow.lastIndexOf("</"));
-        if (lt < 0) {
+        int tagStartIndex = Math.max(prefixWindow.lastIndexOf('<'), prefixWindow.lastIndexOf("</"));
+        if (tagStartIndex < 0) {
             return null;
         }
 
-        String tail = prefixWindow.substring(lt);
-        if (!(tail.startsWith("<") || tail.startsWith("</"))) {
+        String tagToken = prefixWindow.substring(tagStartIndex);
+        if (!(tagToken.startsWith("<") || tagToken.startsWith("</"))) {
             return null;
         }
-        if (tail.contains(">")) {
+        if (tagToken.contains(">")) {
             return null;
         }
 
-        String raw = tail.startsWith("</") ? tail.substring(2) : tail.substring(1);
-        if (raw.isEmpty()) {
+        String rawTagName = tagToken.startsWith("</") ? tagToken.substring(2) : tagToken.substring(1);
+        if (rawTagName.isEmpty()) {
             return "";
         }
-        for (int i = 0; i < raw.length(); i++) {
-            char ch = raw.charAt(i);
+        for (int i = 0; i < rawTagName.length(); i++) {
+            char ch = rawTagName.charAt(i);
             if (!isTagNameChar(ch)) {
                 return null;
             }
         }
-        return raw;
+        return rawTagName;
     }
 
     private static boolean isIdentifierChar(char ch) {

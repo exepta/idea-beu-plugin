@@ -125,52 +125,52 @@ public final class RustBeuIndex {
     }
 
     public static RustBeuIndex get(Project project) {
-        ProjectCache cache;
+        ProjectCache projectCache;
         synchronized (CACHE) {
-            cache = CACHE.get(project);
-            if (cache == null) {
-                cache = new ProjectCache();
-                CACHE.put(project, cache);
+            projectCache = CACHE.get(project);
+            if (projectCache == null) {
+                projectCache = new ProjectCache();
+                CACHE.put(project, projectCache);
             }
         }
 
-        ensureListener(project, cache);
+        ensureListener(project, projectCache);
 
         if (DumbService.isDumb(project)) {
-            Snapshot cachedSnapshot = cache.snapshot;
-            return new RustBeuIndex(project, cache, cachedSnapshot == null ? EMPTY_SNAPSHOT : cachedSnapshot);
+            Snapshot cachedSnapshot = projectCache.snapshot;
+            return new RustBeuIndex(project, projectCache, cachedSnapshot == null ? EMPTY_SNAPSHOT : cachedSnapshot);
         }
 
-        long currentVersion = cache.rustChangeVersion.get();
-        Snapshot cachedSnapshot = cache.snapshot;
+        long currentRustChangeVersion = projectCache.rustChangeVersion.get();
+        Snapshot cachedSnapshot = projectCache.snapshot;
         long now = System.nanoTime();
         if (cachedSnapshot != null) {
-            if (cache.indexedVersion == currentVersion) {
-                return new RustBeuIndex(project, cache, cachedSnapshot);
+            if (projectCache.indexedVersion == currentRustChangeVersion) {
+                return new RustBeuIndex(project, projectCache, cachedSnapshot);
             }
-            if ((now - cache.lastRebuildNanos) < REBUILD_DEBOUNCE_NANOS) {
-                return new RustBeuIndex(project, cache, cachedSnapshot);
+            if ((now - projectCache.lastRebuildNanos) < REBUILD_DEBOUNCE_NANOS) {
+                return new RustBeuIndex(project, projectCache, cachedSnapshot);
             }
         }
 
-        synchronized (cache.lock) {
-            currentVersion = cache.rustChangeVersion.get();
-            cachedSnapshot = cache.snapshot;
+        synchronized (projectCache.lock) {
+            currentRustChangeVersion = projectCache.rustChangeVersion.get();
+            cachedSnapshot = projectCache.snapshot;
             now = System.nanoTime();
             if (cachedSnapshot != null) {
-                if (cache.indexedVersion == currentVersion) {
-                    return new RustBeuIndex(project, cache, cachedSnapshot);
+                if (projectCache.indexedVersion == currentRustChangeVersion) {
+                    return new RustBeuIndex(project, projectCache, cachedSnapshot);
                 }
-                if ((now - cache.lastRebuildNanos) < REBUILD_DEBOUNCE_NANOS) {
-                    return new RustBeuIndex(project, cache, cachedSnapshot);
+                if ((now - projectCache.lastRebuildNanos) < REBUILD_DEBOUNCE_NANOS) {
+                    return new RustBeuIndex(project, projectCache, cachedSnapshot);
                 }
             }
 
-            Snapshot snapshot = buildSnapshot(collectSnapshotFiles(project));
-            cache.snapshot = snapshot;
-            cache.indexedVersion = currentVersion;
-            cache.lastRebuildNanos = System.nanoTime();
-            return new RustBeuIndex(project, cache, snapshot);
+            Snapshot rebuiltSnapshot = buildSnapshot(collectSnapshotFiles(project));
+            projectCache.snapshot = rebuiltSnapshot;
+            projectCache.indexedVersion = currentRustChangeVersion;
+            projectCache.lastRebuildNanos = System.nanoTime();
+            return new RustBeuIndex(project, projectCache, rebuiltSnapshot);
         }
     }
 
@@ -271,15 +271,15 @@ public final class RustBeuIndex {
                 cache.structInfoVersion = currentVersion;
             }
 
-            StructInfo cached = cache.structInfoByName.get(key);
-            if (cached != null) {
-                return cached == MISSING_STRUCT ? null : cached;
+            StructInfo cachedStructInfo = cache.structInfoByName.get(key);
+            if (cachedStructInfo != null) {
+                return cachedStructInfo == MISSING_STRUCT ? null : cachedStructInfo;
             }
 
-            StructInfo fromSnapshot = snapshot.exposedStructInfoByName.get(key);
-            if (fromSnapshot != null) {
-                cache.structInfoByName.put(key, fromSnapshot);
-                return fromSnapshot;
+            StructInfo snapshotStructInfo = snapshot.exposedStructInfoByName.get(key);
+            if (snapshotStructInfo != null) {
+                cache.structInfoByName.put(key, snapshotStructInfo);
+                return snapshotStructInfo;
             }
 
             if (!allowDeepSearch) {
@@ -291,17 +291,17 @@ public final class RustBeuIndex {
                 return null;
             }
 
-            StructInfo resolved = findStructInfo(structName);
-            cache.structInfoByName.put(key, resolved == null ? MISSING_STRUCT : resolved);
-            return resolved;
+            StructInfo resolvedStructInfo = findStructInfo(structName);
+            cache.structInfoByName.put(key, resolvedStructInfo == null ? MISSING_STRUCT : resolvedStructInfo);
+            return resolvedStructInfo;
         }
     }
 
     private static Snapshot buildSnapshot(Collection<VirtualFile> files) {
-        Set<String> tags = new LinkedHashSet<>();
-        Map<String, List<HtmlFunctionTarget>> htmlFns = new LinkedHashMap<>();
-        Map<String, Set<String>> exposedTypesByAlias = new LinkedHashMap<>();
-        Map<String, StructInfo> exposedStructInfos = new LinkedHashMap<>();
+        Set<String> componentTags = new LinkedHashSet<>();
+        Map<String, List<HtmlFunctionTarget>> htmlFunctionTargets = new LinkedHashMap<>();
+        Map<String, Set<String>> exposedTypeNamesByAlias = new LinkedHashMap<>();
+        Map<String, StructInfo> exposedStructInfosByName = new LinkedHashMap<>();
 
         for (VirtualFile file : files) {
             String text = loadText(file);
@@ -309,32 +309,32 @@ public final class RustBeuIndex {
                 continue;
             }
             if (text.contains("#[ui_component]")) {
-                collectUiComponents(text, tags);
+                collectUiComponents(text, componentTags);
             }
             if (text.contains("#[html_fn(")) {
-                collectHtmlFunctions(text, file, htmlFns);
+                collectHtmlFunctions(text, file, htmlFunctionTargets);
             }
             if (text.contains("#[html_use") || text.contains("#[html_shared")) {
-                collectExposedTypes(text, exposedTypesByAlias);
-                collectExposedStructInfo(text, exposedStructInfos);
+                collectExposedTypes(text, exposedTypeNamesByAlias);
+                collectExposedStructInfo(text, exposedStructInfosByName);
             }
         }
 
-        Map<String, List<HtmlFunctionTarget>> immutableFns = new LinkedHashMap<>();
-        for (Map.Entry<String, List<HtmlFunctionTarget>> entry : htmlFns.entrySet()) {
-            immutableFns.put(entry.getKey(), List.copyOf(entry.getValue()));
+        Map<String, List<HtmlFunctionTarget>> immutableFunctionTargets = new LinkedHashMap<>();
+        for (Map.Entry<String, List<HtmlFunctionTarget>> entry : htmlFunctionTargets.entrySet()) {
+            immutableFunctionTargets.put(entry.getKey(), List.copyOf(entry.getValue()));
         }
 
-        Map<String, List<String>> immutableExposed = new LinkedHashMap<>();
-        for (Map.Entry<String, Set<String>> entry : exposedTypesByAlias.entrySet()) {
-            immutableExposed.put(entry.getKey(), List.copyOf(entry.getValue()));
+        Map<String, List<String>> immutableExposedTypesByAlias = new LinkedHashMap<>();
+        for (Map.Entry<String, Set<String>> entry : exposedTypeNamesByAlias.entrySet()) {
+            immutableExposedTypesByAlias.put(entry.getKey(), List.copyOf(entry.getValue()));
         }
 
         return new Snapshot(
-                List.copyOf(tags),
-                Map.copyOf(immutableFns),
-                Map.copyOf(immutableExposed),
-                Map.copyOf(exposedStructInfos)
+                List.copyOf(componentTags),
+                Map.copyOf(immutableFunctionTargets),
+                Map.copyOf(immutableExposedTypesByAlias),
+                Map.copyOf(exposedStructInfosByName)
         );
     }
 
@@ -346,16 +346,16 @@ public final class RustBeuIndex {
         addFilesWithWord(project, "html_fn", scope, files);
         addFilesWithWord(project, "ui_component", scope, files);
 
-        List<VirtualFile> sorted = new ArrayList<>(files);
-        sorted.sort(Comparator.comparing(VirtualFile::getPath));
-        if (sorted.size() <= MAX_FILES_TO_SCAN) {
-            return sorted;
+        List<VirtualFile> sortedFiles = new ArrayList<>(files);
+        sortedFiles.sort(Comparator.comparing(VirtualFile::getPath));
+        if (sortedFiles.size() <= MAX_FILES_TO_SCAN) {
+            return sortedFiles;
         }
-        return List.copyOf(sorted.subList(0, MAX_FILES_TO_SCAN));
+        return List.copyOf(sortedFiles.subList(0, MAX_FILES_TO_SCAN));
     }
 
-    private static void addFilesWithWord(Project project, String word, GlobalSearchScope scope, Set<VirtualFile> files) {
-        PsiSearchHelper.getInstance(project).processAllFilesWithWord(word, scope, psiFile -> {
+    private static void addFilesWithWord(Project project, String searchToken, GlobalSearchScope scope, Set<VirtualFile> files) {
+        PsiSearchHelper.getInstance(project).processAllFilesWithWord(searchToken, scope, psiFile -> {
             VirtualFile virtualFile = psiFile.getVirtualFile();
             if (virtualFile != null && "rs".equalsIgnoreCase(virtualFile.getExtension())) {
                 files.add(virtualFile);
@@ -365,12 +365,12 @@ public final class RustBeuIndex {
     }
 
     private StructInfo findStructInfo(String structName) {
-        List<VirtualFile> files = findCandidateFiles(structName);
-        if (files.isEmpty()) {
+        List<VirtualFile> candidateFiles = findCandidateFiles(structName);
+        if (candidateFiles.isEmpty()) {
             return null;
         }
 
-        for (VirtualFile file : files) {
+        for (VirtualFile file : candidateFiles) {
             String text = loadText(file);
             if (text == null || text.isEmpty() || !text.contains("struct") || !text.contains(structName)) {
                 continue;
@@ -385,19 +385,19 @@ public final class RustBeuIndex {
 
     private List<VirtualFile> findCandidateFiles(String structName) {
         GlobalSearchScope scope = GlobalSearchScope.projectScope(project);
-        List<VirtualFile> candidates = new ArrayList<>();
-        Processor<PsiFile> processor = psiFile -> {
+        List<VirtualFile> candidateFiles = new ArrayList<>();
+        Processor<PsiFile> rustFileCollector = psiFile -> {
             VirtualFile virtualFile = psiFile.getVirtualFile();
             if (virtualFile != null && "rs".equalsIgnoreCase(virtualFile.getExtension())) {
-                candidates.add(virtualFile);
+                candidateFiles.add(virtualFile);
             }
             return true;
         };
-        PsiSearchHelper.getInstance(project).processAllFilesWithWord(structName, scope, processor, true);
+        PsiSearchHelper.getInstance(project).processAllFilesWithWord(structName, scope, rustFileCollector, true);
 
-        if (!candidates.isEmpty()) {
-            candidates.sort(Comparator.comparing(VirtualFile::getPath));
-            return candidates;
+        if (!candidateFiles.isEmpty()) {
+            candidateFiles.sort(Comparator.comparing(VirtualFile::getPath));
+            return candidateFiles;
         }
 
         List<VirtualFile> snapshotFiles = collectSnapshotFiles(project);
@@ -419,8 +419,8 @@ public final class RustBeuIndex {
     private static StructInfo findStructInText(String text, String structName) {
         Matcher structMatcher = STRUCT_PATTERN.matcher(text);
         while (structMatcher.find()) {
-            String currentName = structMatcher.group("name");
-            if (currentName == null || !currentName.equals(structName)) {
+            String matchedStructName = structMatcher.group("name");
+            if (matchedStructName == null || !matchedStructName.equals(structName)) {
                 continue;
             }
             return buildStructInfo(structMatcher.group("docs"), structMatcher.group("body"));
@@ -448,35 +448,6 @@ public final class RustBeuIndex {
         }
 
         return new StructInfo(structDoc, List.copyOf(fields), Map.copyOf(fieldDocs));
-    }
-
-    private static List<VirtualFile> selectFilesForScan(Project project, List<VirtualFile> files) {
-        if (files.size() <= MAX_FILES_TO_SCAN) {
-            return files;
-        }
-
-        String basePath = normalizePath(project.getBasePath());
-        Set<VirtualFile> selected = new LinkedHashSet<>(MAX_FILES_TO_SCAN);
-        if (basePath != null) {
-            String preferredPrefix = basePath + "/src/";
-            for (VirtualFile file : files) {
-                String path = normalizePath(file.getPath());
-                if (path != null && path.startsWith(preferredPrefix)) {
-                    selected.add(file);
-                    if (selected.size() >= MAX_FILES_TO_SCAN) {
-                        return List.copyOf(selected);
-                    }
-                }
-            }
-        }
-
-        for (VirtualFile file : files) {
-            selected.add(file);
-            if (selected.size() >= MAX_FILES_TO_SCAN) {
-                break;
-            }
-        }
-        return List.copyOf(selected);
     }
 
     private static String loadText(VirtualFile file) {
@@ -517,16 +488,16 @@ public final class RustBeuIndex {
         }
     }
 
-    private static void collectHtmlFunctions(String text, VirtualFile file, Map<String, List<HtmlFunctionTarget>> target) {
+    private static void collectHtmlFunctions(String text, VirtualFile file, Map<String, List<HtmlFunctionTarget>> targetMap) {
         Matcher htmlFnMatcher = HTML_FN_PATTERN.matcher(text);
         while (htmlFnMatcher.find()) {
             String htmlName = htmlFnMatcher.group("html").toLowerCase(Locale.ROOT);
             int fnNameOffset = htmlFnMatcher.start("fn");
-            target.computeIfAbsent(htmlName, ignored -> new ArrayList<>()).add(new HtmlFunctionTarget(file, fnNameOffset));
+            targetMap.computeIfAbsent(htmlName, ignored -> new ArrayList<>()).add(new HtmlFunctionTarget(file, fnNameOffset));
         }
     }
 
-    private static void collectExposedTypes(String text, Map<String, Set<String>> target) {
+    private static void collectExposedTypes(String text, Map<String, Set<String>> targetMap) {
         Matcher matcher = HTML_EXPOSED_TYPE_PATTERN.matcher(text);
         while (matcher.find()) {
             String typeName = matcher.group(1);
@@ -534,14 +505,14 @@ public final class RustBeuIndex {
                 continue;
             }
 
-            addExposedAlias(target, typeName, typeName);
-            addExposedAlias(target, toLowerCamel(typeName), typeName);
-            addExposedAlias(target, toSnakeCase(typeName), typeName);
-            addExposedAlias(target, typeName.toLowerCase(Locale.ROOT), typeName);
+            addExposedAlias(targetMap, typeName, typeName);
+            addExposedAlias(targetMap, toLowerCamel(typeName), typeName);
+            addExposedAlias(targetMap, toSnakeCase(typeName), typeName);
+            addExposedAlias(targetMap, typeName.toLowerCase(Locale.ROOT), typeName);
         }
     }
 
-    private static void collectExposedStructInfo(String text, Map<String, StructInfo> target) {
+    private static void collectExposedStructInfo(String text, Map<String, StructInfo> targetMap) {
         Matcher structMatcher = STRUCT_PATTERN.matcher(text);
         while (structMatcher.find()) {
             String structName = structMatcher.group("name");
@@ -555,16 +526,16 @@ public final class RustBeuIndex {
             }
 
             StructInfo info = buildStructInfo(structMatcher.group("docs"), structMatcher.group("body"));
-            target.put(structName.toLowerCase(Locale.ROOT), info);
+            targetMap.put(structName.toLowerCase(Locale.ROOT), info);
         }
     }
 
-    private static void addExposedAlias(Map<String, Set<String>> target, String alias, String typeName) {
+    private static void addExposedAlias(Map<String, Set<String>> targetMap, String alias, String typeName) {
         if (alias == null || alias.isBlank() || typeName == null || typeName.isBlank()) {
             return;
         }
         String normalizedAlias = alias.toLowerCase(Locale.ROOT);
-        target.computeIfAbsent(normalizedAlias, ignored -> new LinkedHashSet<>()).add(typeName);
+        targetMap.computeIfAbsent(normalizedAlias, ignored -> new LinkedHashSet<>()).add(typeName);
     }
 
     private static String toLowerCamel(String typeName) {
@@ -577,19 +548,19 @@ public final class RustBeuIndex {
         return Character.toLowerCase(typeName.charAt(0)) + typeName.substring(1);
     }
 
-    private static String toSnakeCase(String value) {
-        if (value == null || value.isBlank()) {
-            return value;
+    private static String toSnakeCase(String typeName) {
+        if (typeName == null || typeName.isBlank()) {
+            return typeName;
         }
-        StringBuilder result = new StringBuilder(value.length() + 8);
-        for (int i = 0; i < value.length(); i++) {
-            char current = value.charAt(i);
+        StringBuilder result = new StringBuilder(typeName.length() + 8);
+        for (int i = 0; i < typeName.length(); i++) {
+            char current = typeName.charAt(i);
             if (Character.isUpperCase(current)) {
                 if (i > 0) {
-                    char prev = value.charAt(i - 1);
+                    char prev = typeName.charAt(i - 1);
                     if (Character.isLowerCase(prev) || Character.isDigit(prev)) {
                         result.append('_');
-                    } else if (i + 1 < value.length() && Character.isLowerCase(value.charAt(i + 1))) {
+                    } else if (i + 1 < typeName.length() && Character.isLowerCase(typeName.charAt(i + 1))) {
                         result.append('_');
                     }
                 }
@@ -601,12 +572,12 @@ public final class RustBeuIndex {
         return result.toString();
     }
 
-    private static String normalizeRustDoc(String rawDocs) {
-        if (rawDocs == null || rawDocs.isBlank()) {
+    private static String normalizeRustDoc(String rawDocumentation) {
+        if (rawDocumentation == null || rawDocumentation.isBlank()) {
             return null;
         }
 
-        String[] lines = rawDocs.split("\\R");
+        String[] lines = rawDocumentation.split("\\R");
         StringBuilder result = new StringBuilder();
         for (String line : lines) {
             String normalized = line.trim();

@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -60,8 +61,8 @@ public final class NewBeuComponentAction extends AnAction {
             return;
         }
 
-        ParsedInput parsedInput = parseInput(dialog.componentInput());
-        if (parsedInput == null) {
+        ParsedComponentPath parsedComponentPath = parseComponentPathInput(dialog.componentInput());
+        if (parsedComponentPath == null) {
             Messages.showErrorDialog(project, "Please enter a valid component name.", "Invalid beu component name");
             return;
         }
@@ -78,8 +79,8 @@ public final class NewBeuComponentAction extends AnAction {
 
         try {
             WriteCommandAction.runWriteCommandAction(project, () -> {
-                CreatedComponent createdComponent = createComponentFiles(project, targetDirectory, parsedInput);
-                prependRegistryEntry(project, registryPath, createdComponent);
+                CreatedComponent createdComponent = createComponentFiles(targetDirectory, parsedComponentPath);
+                appendRegistryEntry(project, registryPath, createdComponent);
             });
         } catch (IllegalArgumentException error) {
             Messages.showErrorDialog(project, error.getMessage(), "Could not create beu component");
@@ -95,42 +96,42 @@ public final class NewBeuComponentAction extends AnAction {
         return directories.length == 0 ? null : directories[0];
     }
 
-    private static ParsedInput parseInput(String userInput) {
-        String normalized = userInput.trim().replace('\\', '/');
-        normalized = normalized.replaceAll("/+", "/");
-        if (normalized.isBlank()) {
+    private static ParsedComponentPath parseComponentPathInput(String userInput) {
+        String normalizedInput = userInput.trim().replace('\\', '/');
+        normalizedInput = normalizedInput.replaceAll("/+", "/");
+        if (normalizedInput.isBlank()) {
             return null;
         }
-        if (normalized.startsWith("/") || normalized.endsWith("/")) {
+        if (normalizedInput.startsWith("/") || normalizedInput.endsWith("/")) {
             return null;
         }
 
-        String[] segments = normalized.split("/");
-        List<String> folders = new ArrayList<>();
-        for (int i = 0; i < segments.length - 1; i++) {
-            String folder = segments[i].trim();
-            if (!isValidPathSegment(folder)) {
+        String[] pathSegments = normalizedInput.split("/");
+        List<String> targetDirectories = new ArrayList<>();
+        for (int i = 0; i < pathSegments.length - 1; i++) {
+            String directoryName = pathSegments[i].trim();
+            if (!isValidPathSegment(directoryName)) {
                 return null;
             }
-            folders.add(folder);
+            targetDirectories.add(directoryName);
         }
 
-        String componentName = segments[segments.length - 1].trim();
-        if (!isValidPathSegment(componentName)) {
+        String componentBaseName = pathSegments[pathSegments.length - 1].trim();
+        if (!isValidPathSegment(componentBaseName)) {
             return null;
         }
 
-        return new ParsedInput(folders, componentName);
+        return new ParsedComponentPath(targetDirectories, componentBaseName);
     }
 
-    private static CreatedComponent createComponentFiles(Project project, PsiDirectory baseDirectory, ParsedInput parsedInput) {
+    private static CreatedComponent createComponentFiles(PsiDirectory baseDirectory, ParsedComponentPath parsedComponentPath) {
         PsiDirectory targetDirectory = baseDirectory;
-        for (String folder : parsedInput.folders()) {
-            PsiDirectory existing = targetDirectory.findSubdirectory(folder);
-            targetDirectory = existing != null ? existing : targetDirectory.createSubdirectory(folder);
+        for (String directoryName : parsedComponentPath.targetDirectories()) {
+            PsiDirectory existingSubdirectory = targetDirectory.findSubdirectory(directoryName);
+            targetDirectory = existingSubdirectory != null ? existingSubdirectory : targetDirectory.createSubdirectory(directoryName);
         }
 
-        String componentName = parsedInput.componentName();
+        String componentName = parsedComponentPath.componentBaseName();
         String rustFileName = componentName + ".component.rs";
         String htmlFileName = componentName + ".component.html";
         String cssFileName = componentName + ".component.css";
@@ -150,40 +151,40 @@ public final class NewBeuComponentAction extends AnAction {
         return new CreatedComponent(componentName, rustFile.getVirtualFile());
     }
 
-    private static void prependRegistryEntry(Project project, String registryPathInput, CreatedComponent createdComponent) {
-        VirtualFile registryFile = resolveRegistryFile(project, registryPathInput);
+    private static void appendRegistryEntry(Project project, String registryFilePathInput, CreatedComponent createdComponent) {
+        VirtualFile registryFile = resolveRegistryFile(project, registryFilePathInput);
         if (registryFile == null || registryFile.isDirectory()) {
-            throw new IllegalArgumentException("Registry file not found: " + registryPathInput);
+            throw new IllegalArgumentException("Registry file not found: " + registryFilePathInput);
         }
         if (!registryFile.isWritable()) {
             throw new IllegalArgumentException("Registry file is not writable: " + registryFile.getPath());
         }
 
-        var document = FileDocumentManager.getInstance().getDocument(registryFile);
+        Document document = FileDocumentManager.getInstance().getDocument(registryFile);
         if (document == null) {
             throw new IllegalArgumentException("Could not open registry file: " + registryFile.getPath());
         }
 
-        String modName = toSnakeIdentifier(createdComponent.componentName()) + "_component_mod";
-        String relativePath = relativeComponentPath(registryFile, createdComponent.rustFile());
-        String snippet = buildRegistrySnippet(relativePath, modName);
+        String componentModuleName = toSnakeIdentifier(createdComponent.componentName()) + "_component_mod";
+        String relativeComponentFilePath = relativeComponentPath(registryFile, createdComponent.rustFile());
+        String registryModuleSnippet = buildRegistrySnippet(relativeComponentFilePath, componentModuleName);
 
-        if (document.getText().contains("mod " + modName + ";")) {
+        if (document.getText().contains("mod " + componentModuleName + ";")) {
             return;
         }
 
-        String original = document.getText();
-        String separator;
-        if (original.isBlank()) {
-            separator = "";
-        } else if (original.endsWith("\n\n")) {
-            separator = "";
-        } else if (original.endsWith("\n")) {
-            separator = "\n";
+        String existingContent = document.getText();
+        String spacingPrefix;
+        if (existingContent.isBlank()) {
+            spacingPrefix = "";
+        } else if (existingContent.endsWith("\n\n")) {
+            spacingPrefix = "";
+        } else if (existingContent.endsWith("\n")) {
+            spacingPrefix = "\n";
         } else {
-            separator = "\n\n";
+            spacingPrefix = "\n\n";
         }
-        document.setText(original + separator + snippet);
+        document.setText(existingContent + spacingPrefix + registryModuleSnippet);
         PsiDocumentManager.getInstance(project).commitDocument(document);
         FileDocumentManager.getInstance().saveDocument(document);
     }
@@ -214,14 +215,14 @@ public final class NewBeuComponentAction extends AnAction {
     }
 
     private static String resolveDefaultRegistryPath(Project project, PsiDirectory targetDirectory) {
-        VirtualFile beuRegistry = findBeuRegistryFile(project, targetDirectory.getVirtualFile());
-        if (beuRegistry != null) {
-            return beuRegistry.getPath();
+        VirtualFile registryMarkerFile = findBeuRegistryFile(project, targetDirectory.getVirtualFile());
+        if (registryMarkerFile != null) {
+            return registryMarkerFile.getPath();
         }
 
-        VirtualFile ancestorMain = findMainRsInAncestors(targetDirectory.getVirtualFile(), project.getBasePath());
-        if (ancestorMain != null) {
-            return ancestorMain.getPath();
+        VirtualFile nearestMainRs = findMainRsInAncestors(targetDirectory.getVirtualFile(), project.getBasePath());
+        if (nearestMainRs != null) {
+            return nearestMainRs.getPath();
         }
 
         String projectBasePath = project.getBasePath();
@@ -239,17 +240,17 @@ public final class NewBeuComponentAction extends AnAction {
             }
         }
 
-        Collection<VirtualFile> projectMains = FilenameIndex.getVirtualFilesByName(project, "main.rs", GlobalSearchScope.projectScope(project));
-        VirtualFile selected = null;
-        for (VirtualFile candidate : projectMains) {
+        Collection<VirtualFile> projectMainFiles = FilenameIndex.getVirtualFilesByName(project, "main.rs", GlobalSearchScope.projectScope(project));
+        VirtualFile shortestPathMainFile = null;
+        for (VirtualFile candidate : projectMainFiles) {
             if (candidate.isDirectory()) {
                 continue;
             }
-            if (selected == null || candidate.getPath().length() < selected.getPath().length()) {
-                selected = candidate;
+            if (shortestPathMainFile == null || candidate.getPath().length() < shortestPathMainFile.getPath().length()) {
+                shortestPathMainFile = candidate;
             }
         }
-        return selected == null ? "" : selected.getPath();
+        return shortestPathMainFile == null ? "" : shortestPathMainFile.getPath();
     }
 
     private static @Nullable VirtualFile findBeuRegistryFile(Project project, VirtualFile targetDirectory) {
@@ -272,38 +273,38 @@ public final class NewBeuComponentAction extends AnAction {
             return null;
         }
 
-        VirtualFile best = null;
-        int bestScore = Integer.MIN_VALUE;
-        String selectedPath = targetDirectory.getPath();
+        VirtualFile bestCandidate = null;
+        int bestCandidateScore = Integer.MIN_VALUE;
+        String selectedDirectoryPath = targetDirectory.getPath();
         for (VirtualFile candidate : candidates) {
-            VirtualFile parent = candidate.getParent();
-            String parentPath = parent == null ? "" : parent.getPath();
+            VirtualFile parentDirectory = candidate.getParent();
+            String parentDirectoryPath = parentDirectory == null ? "" : parentDirectory.getPath();
             int score;
-            if (!parentPath.isEmpty() && selectedPath.startsWith(parentPath + "/")) {
-                score = 100_000 + parentPath.length();
+            if (!parentDirectoryPath.isEmpty() && selectedDirectoryPath.startsWith(parentDirectoryPath + "/")) {
+                score = 100_000 + parentDirectoryPath.length();
             } else {
                 score = -candidate.getPath().length();
             }
-            if (score > bestScore) {
-                bestScore = score;
-                best = candidate;
+            if (score > bestCandidateScore) {
+                bestCandidateScore = score;
+                bestCandidate = candidate;
             }
         }
-        return best;
+        return bestCandidate;
     }
 
     private static @Nullable VirtualFile findMainRsInAncestors(VirtualFile startDirectory, String projectBasePath) {
-        String normalizedBase = projectBasePath == null ? null : projectBasePath.replace('\\', '/');
-        VirtualFile current = startDirectory;
-        while (current != null) {
-            VirtualFile child = current.findChild("main.rs");
-            if (child != null && !child.isDirectory()) {
-                return child;
+        String normalizedProjectBasePath = projectBasePath == null ? null : projectBasePath.replace('\\', '/');
+        VirtualFile currentDirectory = startDirectory;
+        while (currentDirectory != null) {
+            VirtualFile mainRsFile = currentDirectory.findChild("main.rs");
+            if (mainRsFile != null && !mainRsFile.isDirectory()) {
+                return mainRsFile;
             }
-            if (normalizedBase != null && normalizedBase.equals(current.getPath())) {
+            if (normalizedProjectBasePath != null && normalizedProjectBasePath.equals(currentDirectory.getPath())) {
                 break;
             }
-            current = current.getParent();
+            currentDirectory = currentDirectory.getParent();
         }
         return null;
     }
@@ -340,23 +341,23 @@ public final class NewBeuComponentAction extends AnAction {
                 "mod " + modName + ";\n\n";
     }
 
-    private static String relativeComponentPath(VirtualFile registryFile, VirtualFile componentRsFile) {
+    private static String relativeComponentPath(VirtualFile registryFile, VirtualFile componentRustFile) {
         VirtualFile registryParent = registryFile.getParent();
         if (registryParent == null) {
-            return componentRsFile.getPath().replace('\\', '/');
+            return componentRustFile.getPath().replace('\\', '/');
         }
         try {
-            Path from = Paths.get(registryParent.getPath());
-            Path to = Paths.get(componentRsFile.getPath());
-            String relative = from.relativize(to).toString().replace('\\', '/');
-            return relative.isBlank() ? componentRsFile.getName() : relative;
+            Path parentDirectoryPath = Paths.get(registryParent.getPath());
+            Path componentPath = Paths.get(componentRustFile.getPath());
+            String relativePath = parentDirectoryPath.relativize(componentPath).toString().replace('\\', '/');
+            return relativePath.isBlank() ? componentRustFile.getName() : relativePath;
         } catch (Exception ignored) {
-            return componentRsFile.getPath().replace('\\', '/');
+            return componentRustFile.getPath().replace('\\', '/');
         }
     }
 
     private static String toPascalIdentifier(String name) {
-        List<String> parts = toAlnumTokens(name);
+        List<String> parts = toAlphanumericTokens(name);
         StringBuilder result = new StringBuilder();
         for (String part : parts) {
             result.append(Character.toUpperCase(part.charAt(0)));
@@ -374,7 +375,7 @@ public final class NewBeuComponentAction extends AnAction {
     }
 
     private static String toUpperSnakeIdentifier(String name) {
-        List<String> parts = toAlnumTokens(name);
+        List<String> parts = toAlphanumericTokens(name);
         StringBuilder result = new StringBuilder();
         for (String part : parts) {
             if (!result.isEmpty()) {
@@ -392,7 +393,7 @@ public final class NewBeuComponentAction extends AnAction {
     }
 
     private static String toSnakeIdentifier(String name) {
-        List<String> parts = toAlnumTokens(name);
+        List<String> parts = toAlphanumericTokens(name);
         StringBuilder result = new StringBuilder();
         for (String part : parts) {
             if (!result.isEmpty()) {
@@ -409,39 +410,39 @@ public final class NewBeuComponentAction extends AnAction {
         return result.toString();
     }
 
-    private static List<String> toAlnumTokens(String name) {
-        List<String> parts = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        for (int i = 0; i < name.length(); i++) {
-            char ch = name.charAt(i);
-            if (Character.isLetterOrDigit(ch)) {
-                current.append(ch);
+    private static List<String> toAlphanumericTokens(String name) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder currentToken = new StringBuilder();
+        for (int index = 0; index < name.length(); index++) {
+            char currentChar = name.charAt(index);
+            if (Character.isLetterOrDigit(currentChar)) {
+                currentToken.append(currentChar);
                 continue;
             }
-            if (!current.isEmpty()) {
-                parts.add(current.toString());
-                current.setLength(0);
+            if (!currentToken.isEmpty()) {
+                tokens.add(currentToken.toString());
+                currentToken.setLength(0);
             }
         }
-        if (!current.isEmpty()) {
-            parts.add(current.toString());
+        if (!currentToken.isEmpty()) {
+            tokens.add(currentToken.toString());
         }
-        return parts;
+        return tokens;
     }
 
-    private static boolean isValidPathSegment(String part) {
-        if (part.isBlank()) {
+    private static boolean isValidPathSegment(String segment) {
+        if (segment.isBlank()) {
             return false;
         }
-        if (".".equals(part) || "..".equals(part)) {
+        if (".".equals(segment) || "..".equals(segment)) {
             return false;
         }
-        for (int i = 0; i < part.length(); i++) {
-            char ch = part.charAt(i);
-            if (ch < 32) {
+        for (int index = 0; index < segment.length(); index++) {
+            char currentChar = segment.charAt(index);
+            if (currentChar < 32) {
                 return false;
             }
-            if ("\\/:*?\"<>|".indexOf(ch) >= 0) {
+            if ("\\/:*?\"<>|".indexOf(currentChar) >= 0) {
                 return false;
             }
         }
@@ -455,7 +456,7 @@ public final class NewBeuComponentAction extends AnAction {
     private record CreatedComponent(String componentName, VirtualFile rustFile) {
     }
 
-    private record ParsedInput(List<String> folders, String componentName) {
+    private record ParsedComponentPath(List<String> targetDirectories, String componentBaseName) {
     }
 
     private static final class CreateBeuComponentDialog extends DialogWrapper {

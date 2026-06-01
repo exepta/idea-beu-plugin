@@ -95,11 +95,11 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
     public void generateProject(Project project, VirtualFile baseDir, BevyProjectSettings settings, Module module) {
         WriteAction.run(() -> {
             try {
-                String markerFileName = normalizeRegistryFileName(settings.registryFileName());
-                boolean createRegistryMarker = shouldCreateRegistryMarker(settings);
+                String registryFileName = normalizeRegistryFileName(settings.registryFileName());
+                boolean shouldGenerateRegistryMarker = shouldCreateRegistryMarker(settings);
 
                 writeFile(baseDir, "Cargo.toml", buildCargoToml(baseDir.getName(), settings));
-                writeFile(baseDir, "src/main.rs", buildMainRs(settings.includeBevyExtendedUi(), createRegistryMarker, markerFileName));
+                writeFile(baseDir, "src/main.rs", buildMainRs(settings.includeBevyExtendedUi(), shouldGenerateRegistryMarker, registryFileName));
                 writeFile(baseDir, "README.md", buildReadme(baseDir.getName(), settings));
                 if (settings.createGitignore()) {
                     writeFile(baseDir, ".gitignore", "/target\n");
@@ -109,8 +109,8 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
                     ensureDirectory(baseDir, "assets");
                 }
 
-                if (createRegistryMarker) {
-                    writeFile(baseDir, "src/" + markerFileName + ".rs", buildRegistryRs());
+                if (shouldGenerateRegistryMarker) {
+                    writeFile(baseDir, "src/" + registryFileName + ".rs", buildRegistryRs());
                     createMainComponentAssets(baseDir);
                     writeFile(baseDir, "assets/index.html", INDEX_HTML);
                 }
@@ -139,37 +139,37 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
     }
 
     private static void writeFile(VirtualFile baseDir, String relativePath, String content) throws IOException {
-        String[] segments = relativePath.split("/");
-        VirtualFile current = baseDir;
-        for (int i = 0; i < segments.length - 1; i++) {
-            String segment = segments[i];
-            VirtualFile child = current.findChild(segment);
-            if (child == null) {
-                child = current.createChildDirectory(BevyDirectoryProjectGenerator.class, segment);
+        String[] pathSegments = relativePath.split("/");
+        VirtualFile currentDirectory = baseDir;
+        for (int i = 0; i < pathSegments.length - 1; i++) {
+            String segment = pathSegments[i];
+            VirtualFile childDirectory = currentDirectory.findChild(segment);
+            if (childDirectory == null) {
+                childDirectory = currentDirectory.createChildDirectory(BevyDirectoryProjectGenerator.class, segment);
             }
-            current = child;
+            currentDirectory = childDirectory;
         }
 
-        String fileName = segments[segments.length - 1];
-        VirtualFile file = current.findChild(fileName);
+        String fileName = pathSegments[pathSegments.length - 1];
+        VirtualFile file = currentDirectory.findChild(fileName);
         if (file == null) {
-            file = current.createChildData(BevyDirectoryProjectGenerator.class, fileName);
+            file = currentDirectory.createChildData(BevyDirectoryProjectGenerator.class, fileName);
         }
         VfsUtil.saveText(file, content);
     }
 
     private static void ensureDirectory(VirtualFile baseDir, String relativePath) throws IOException {
-        String[] segments = relativePath.split("/");
-        VirtualFile current = baseDir;
-        for (String segment : segments) {
+        String[] pathSegments = relativePath.split("/");
+        VirtualFile currentDirectory = baseDir;
+        for (String segment : pathSegments) {
             if (segment.isBlank()) {
                 continue;
             }
-            VirtualFile child = current.findChild(segment);
-            if (child == null) {
-                child = current.createChildDirectory(BevyDirectoryProjectGenerator.class, segment);
+            VirtualFile childDirectory = currentDirectory.findChild(segment);
+            if (childDirectory == null) {
+                childDirectory = currentDirectory.createChildDirectory(BevyDirectoryProjectGenerator.class, segment);
             }
-            current = child;
+            currentDirectory = childDirectory;
         }
     }
 
@@ -193,31 +193,31 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
     }
 
     private static String normalizeRegistryFileName(String name) {
-        String raw = name == null ? "" : name.trim();
-        if (raw.endsWith(".rs")) {
-            raw = raw.substring(0, raw.length() - 3);
+        String trimmedName = name == null ? "" : name.trim();
+        if (trimmedName.endsWith(".rs")) {
+            trimmedName = trimmedName.substring(0, trimmedName.length() - 3);
         }
-        if (raw.isBlank()) {
+        if (trimmedName.isBlank()) {
             return "beu_registry_marker";
         }
 
-        StringBuilder sanitized = new StringBuilder();
-        for (int i = 0; i < raw.length(); i++) {
-            char ch = raw.charAt(i);
-            if (Character.isLetterOrDigit(ch) || ch == '_') {
-                sanitized.append(ch);
+        StringBuilder sanitizedName = new StringBuilder();
+        for (int i = 0; i < trimmedName.length(); i++) {
+            char currentChar = trimmedName.charAt(i);
+            if (Character.isLetterOrDigit(currentChar) || currentChar == '_') {
+                sanitizedName.append(currentChar);
             } else {
-                sanitized.append('_');
+                sanitizedName.append('_');
             }
         }
 
-        String value = sanitized.toString().replaceAll("_+", "_");
-        value = value.replaceAll("^_+", "");
-        value = value.replaceAll("_+$", "");
-        if (value.isBlank()) {
+        String normalizedName = sanitizedName.toString().replaceAll("_+", "_");
+        normalizedName = normalizedName.replaceAll("^_+", "");
+        normalizedName = normalizedName.replaceAll("_+$", "");
+        if (normalizedName.isBlank()) {
             return "beu_registry_marker";
         }
-        return value;
+        return normalizedName;
     }
 
     private static String buildCargoToml(String directoryName, BevyProjectSettings settings) {
@@ -231,15 +231,15 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
                 .sorted(Comparator.naturalOrder())
                 .toList();
 
-        StringBuilder toml = new StringBuilder();
-        toml.append("[package]\n")
+        StringBuilder cargoTomlBuilder = new StringBuilder();
+        cargoTomlBuilder.append("[package]\n")
                 .append("name = \"").append(packageName).append("\"\n")
                 .append("version = \"0.1.0\"\n")
                 .append("edition = \"").append(edition).append("\"\n")
                 .append("authors = [\"\"]\n")
                 .append("description = \"Auto generated bevy app from beu-plugin\"\n\n");
 
-        appendDependencyBlock(toml, "bevy", new DependencySpec("version", bevyVersion, null, null, List.of()));
+        appendDependencyBlock(cargoTomlBuilder, "bevy", new DependencySpec("version", bevyVersion, null, null, List.of()));
 
         if (settings.includeBevyExtendedUi()) {
             DependencySpec beuSpec;
@@ -248,7 +248,7 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
             } else {
                 beuSpec = new DependencySpec("version", normalizeCrateVersion(settings.bevyExtendedUiVersion()), null, null, selectedFeatures);
             }
-            appendDependencyBlock(toml, "bevy_extended_ui", beuSpec);
+            appendDependencyBlock(cargoTomlBuilder, "bevy_extended_ui", beuSpec);
 
             if (shouldAddMacrosDependency(settings)) {
                 DependencySpec macrosSpec;
@@ -257,7 +257,7 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
                 } else {
                     macrosSpec = new DependencySpec("version", normalizeCrateVersion(settings.bevyExtendedUiVersion()), null, null, List.of());
                 }
-                appendDependencyBlock(toml, "bevy_extended_ui_macros", macrosSpec);
+                appendDependencyBlock(cargoTomlBuilder, "bevy_extended_ui_macros", macrosSpec);
             }
         }
 
@@ -269,24 +269,24 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
                     || "bevy_extended_ui_macros".equals(dependencyName)) {
                 continue;
             }
-            appendDependencyBlock(toml, dependencyName, entry.getValue());
+            appendDependencyBlock(cargoTomlBuilder, dependencyName, entry.getValue());
         }
-        return toml.toString();
+        return cargoTomlBuilder.toString();
     }
 
     private static String sanitizePackageName(String name) {
         String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
-        StringBuilder builder = new StringBuilder();
+        StringBuilder normalizedNameBuilder = new StringBuilder();
         for (int i = 0; i < lower.length(); i++) {
             char ch = lower.charAt(i);
             if (Character.isLetterOrDigit(ch) || ch == '_' || ch == '-') {
-                builder.append(ch);
+                normalizedNameBuilder.append(ch);
             } else {
-                builder.append('-');
+                normalizedNameBuilder.append('-');
             }
         }
 
-        String normalized = builder.toString().replaceAll("-+", "-");
+        String normalized = normalizedNameBuilder.toString().replaceAll("-+", "-");
         normalized = normalized.replaceAll("^-+", "");
         normalized = normalized.replaceAll("-+$", "");
         if (normalized.isBlank()) {
@@ -309,37 +309,37 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
         return value.isBlank() ? "0.1.0" : value;
     }
 
-    private static void appendDependencyBlock(StringBuilder toml, String dependencyName, DependencySpec dependency) {
-        toml.append("[dependencies.")
+    private static void appendDependencyBlock(StringBuilder cargoTomlBuilder, String dependencyName, DependencySpec dependency) {
+        cargoTomlBuilder.append("[dependencies.")
                 .append(dependencyName)
                 .append("]\n");
         if ("git".equals(dependency.sourceType())) {
-            toml.append("git = \"").append(dependency.gitUrl()).append("\"\n");
+            cargoTomlBuilder.append("git = \"").append(dependency.gitUrl()).append("\"\n");
             if (dependency.branch() != null && !dependency.branch().isBlank()) {
-                toml.append("branch = \"").append(dependency.branch()).append("\"\n");
+                cargoTomlBuilder.append("branch = \"").append(dependency.branch()).append("\"\n");
             }
         } else {
-            toml.append("version = \"").append(dependency.version()).append("\"\n");
+            cargoTomlBuilder.append("version = \"").append(dependency.version()).append("\"\n");
         }
         if (!dependency.features().isEmpty()) {
             String serializedFeatures = dependency.features().stream()
                     .map(feature -> "\"" + feature + "\"")
                     .collect(Collectors.joining(", "));
-            toml.append("features = [").append(serializedFeatures).append("]\n");
+            cargoTomlBuilder.append("features = [").append(serializedFeatures).append("]\n");
         }
-        toml.append("\n");
+        cargoTomlBuilder.append("\n");
     }
 
     private static Map<String, DependencySpec> toAssetDependencies(List<BevyProjectSettings.BevyAssetSelection> assets) {
-        Map<String, DependencySpec> dependencies = new LinkedHashMap<>();
+        Map<String, DependencySpec> assetDependencyMap = new LinkedHashMap<>();
         for (BevyProjectSettings.BevyAssetSelection asset : assets) {
             DependencyEntry dependencyEntry = resolveAssetDependency(asset.url());
             if (dependencyEntry == null) {
                 continue;
             }
-            dependencies.putIfAbsent(dependencyEntry.name(), dependencyEntry.spec());
+            assetDependencyMap.putIfAbsent(dependencyEntry.name(), dependencyEntry.spec());
         }
-        return dependencies;
+        return assetDependencyMap;
     }
 
     private static DependencyEntry resolveAssetDependency(String url) {
@@ -350,25 +350,25 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
                 return null;
             }
             String normalizedHost = host.toLowerCase(Locale.ROOT);
-            String[] segments = uri.getPath().split("/");
-            List<String> filteredSegments = new java.util.ArrayList<>();
-            for (String segment : segments) {
+            String[] pathSegments = uri.getPath().split("/");
+            List<String> nonEmptyPathSegments = new java.util.ArrayList<>();
+            for (String segment : pathSegments) {
                 if (!segment.isBlank()) {
-                    filteredSegments.add(segment);
+                    nonEmptyPathSegments.add(segment);
                 }
             }
 
-            if (normalizedHost.contains("crates.io") && filteredSegments.size() >= 2 && "crates".equals(filteredSegments.get(0))) {
-                String crate = sanitizePackageName(filteredSegments.get(1));
+            if (normalizedHost.contains("crates.io") && nonEmptyPathSegments.size() >= 2 && "crates".equals(nonEmptyPathSegments.get(0))) {
+                String crate = sanitizePackageName(nonEmptyPathSegments.get(1));
                 return new DependencyEntry(crate, new DependencySpec("version", "*", null, null, List.of()));
             }
-            if (normalizedHost.contains("docs.rs") && !filteredSegments.isEmpty()) {
-                String crate = sanitizePackageName(filteredSegments.get(0));
+            if (normalizedHost.contains("docs.rs") && !nonEmptyPathSegments.isEmpty()) {
+                String crate = sanitizePackageName(nonEmptyPathSegments.get(0));
                 return new DependencyEntry(crate, new DependencySpec("version", "*", null, null, List.of()));
             }
-            if ((normalizedHost.contains("github.com") || normalizedHost.contains("gitlab.com")) && filteredSegments.size() >= 2) {
-                String owner = filteredSegments.get(0);
-                String repo = filteredSegments.get(1);
+            if ((normalizedHost.contains("github.com") || normalizedHost.contains("gitlab.com")) && nonEmptyPathSegments.size() >= 2) {
+                String owner = nonEmptyPathSegments.get(0);
+                String repo = nonEmptyPathSegments.get(1);
                 if (repo.endsWith(".git")) {
                     repo = repo.substring(0, repo.length() - 4);
                 }
@@ -407,9 +407,9 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
     private static boolean isSemverAtLeast(String version, int major, int minor, int patch) {
         try {
             String[] parts = version.split("[.-]");
-            int vMajor = parts.length > 0 ? parseIntOrZero(parts[0]) : 0;
-            int vMinor = parts.length > 1 ? parseIntOrZero(parts[1]) : 0;
-            int vPatch = parts.length > 2 ? parseIntOrZero(parts[2]) : 0;
+            int vMajor = parts.length > 0 ? parseLeadingIntOrZero(parts[0]) : 0;
+            int vMinor = parts.length > 1 ? parseLeadingIntOrZero(parts[1]) : 0;
+            int vPatch = parts.length > 2 ? parseLeadingIntOrZero(parts[2]) : 0;
             if (vMajor != major) {
                 return vMajor > major;
             }
@@ -422,7 +422,7 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
         }
     }
 
-    private static int parseIntOrZero(String value) {
+    private static int parseLeadingIntOrZero(String value) {
         String digits = value.replaceAll("[^0-9].*$", "");
         if (digits.isBlank()) {
             return 0;
@@ -434,11 +434,11 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
         if (!includeBevyExtendedUi) {
             return MAIN_RS_DEFAULT;
         }
-        StringBuilder builder = new StringBuilder();
+        StringBuilder mainRsBuilder = new StringBuilder();
         if (includeRegistryMod) {
-            builder.append("mod ").append(toRustModuleIdentifier(registryFileName)).append(";\n\n");
+            mainRsBuilder.append("mod ").append(toRustModuleIdentifier(registryFileName)).append(";\n\n");
         }
-        builder.append("use bevy::asset::{AssetMetaCheck, AssetPlugin};\n")
+        mainRsBuilder.append("use bevy::asset::{AssetMetaCheck, AssetPlugin};\n")
                 .append("use bevy::prelude::*;\n")
                 .append("use bevy_extended_ui::ExtendedUiPlugin;\n")
                 .append("\n")
@@ -452,7 +452,7 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
                 .append("        .add_plugins(ExtendedUiPlugin)\n")
                 .append("        .run();\n")
                 .append("}\n");
-        return builder.toString();
+        return mainRsBuilder.toString();
     }
 
     private static String toRustModuleIdentifier(String fileName) {
@@ -499,13 +499,65 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
 
     private static String buildReadme(String directoryName, BevyProjectSettings settings) {
         String projectName = directoryName == null || directoryName.isBlank() ? "Bevy Project" : directoryName;
+        boolean includeBeu = settings.includeBevyExtendedUi();
+        boolean includeRegistryMarker = shouldCreateRegistryMarker(settings);
+        String registryFileName = normalizeRegistryFileName(settings.registryFileName()) + ".rs";
+        String edition = settings.rustEdition() == null || settings.rustEdition().isBlank()
+                ? "2024"
+                : settings.rustEdition();
+        List<String> selectedFeatures = settings.bevyExtendedUiFeatures().stream()
+                .filter(feature -> feature != null && !feature.isBlank())
+                .sorted(Comparator.naturalOrder())
+                .toList();
+
         StringBuilder readme = new StringBuilder();
         readme.append("# ").append(projectName).append("\n\n")
-                .append("This project was generated with the `beu-plugin` Bevy project wizard.\n\n")
+                .append("Generated with the `beu-plugin` Bevy project wizard.\n\n")
+                .append("## Stack\n")
+                .append("- Rust edition: `").append(edition).append("`\n")
+                .append("- Bevy: `").append(normalizeCrateVersion(settings.bevyVersion())).append("`\n");
+
+        if (includeBeu) {
+            if (isBeuMainGitSelection(settings.bevyExtendedUiVersion())) {
+                readme.append("- bevy_extended_ui: `main` (git)\n");
+            } else {
+                readme.append("- bevy_extended_ui: `")
+                        .append(normalizeCrateVersion(settings.bevyExtendedUiVersion()))
+                        .append("`\n");
+            }
+            if (selectedFeatures.isEmpty()) {
+                readme.append("- bevy_extended_ui features: none selected\n");
+            } else {
+                readme.append("- bevy_extended_ui features: ")
+                        .append(selectedFeatures.stream().map(feature -> "`" + feature + "`").collect(Collectors.joining(", ")))
+                        .append("\n");
+            }
+        } else {
+            readme.append("- bevy_extended_ui: not included\n");
+        }
+
+        readme.append("\n")
+                .append("## Project Structure\n")
+                .append("- `src/main.rs`\n");
+
+        if (includeRegistryMarker) {
+            readme.append("- `src/").append(registryFileName).append("`\n");
+        }
+        if (includeBeu) {
+            readme.append("- `assets/`\n");
+        }
+        if (includeRegistryMarker) {
+            readme.append("- `assets/index.html`\n")
+                    .append("- `assets/components/main.component.rs`\n")
+                    .append("- `assets/components/main.component.html`\n")
+                    .append("- `assets/components/main.component.css`\n");
+        }
+
+        readme.append("\n")
                 .append("## Links\n")
                 .append("- Bevy: https://github.com/bevyengine/bevy\n");
 
-        if (settings.includeBevyExtendedUi()) {
+        if (includeBeu) {
             readme.append("- bevy_extended_ui: https://github.com/exepta/bevy_extended_ui\n");
         }
 
@@ -531,7 +583,7 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
     }
 
     private static String toPascalIdentifier(String name) {
-        List<String> parts = toAlnumTokens(name);
+        List<String> parts = toAlphanumericTokens(name);
         StringBuilder result = new StringBuilder();
         for (String part : parts) {
             result.append(Character.toUpperCase(part.charAt(0)));
@@ -549,7 +601,7 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
     }
 
     private static String toUpperSnakeIdentifier(String name) {
-        List<String> parts = toAlnumTokens(name);
+        List<String> parts = toAlphanumericTokens(name);
         StringBuilder result = new StringBuilder();
         for (String part : parts) {
             if (!result.isEmpty()) {
@@ -566,32 +618,33 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
         return result.toString();
     }
 
-    private static List<String> toAlnumTokens(String name) {
-        List<String> parts = new java.util.ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        for (int i = 0; i < name.length(); i++) {
-            char ch = name.charAt(i);
-            if (Character.isLetterOrDigit(ch)) {
-                current.append(ch);
+    private static List<String> toAlphanumericTokens(String name) {
+        List<String> tokens = new java.util.ArrayList<>();
+        StringBuilder currentToken = new StringBuilder();
+        for (int index = 0; index < name.length(); index++) {
+            char currentChar = name.charAt(index);
+            if (Character.isLetterOrDigit(currentChar)) {
+                currentToken.append(currentChar);
                 continue;
             }
-            if (!current.isEmpty()) {
-                parts.add(current.toString());
-                current.setLength(0);
+            if (!currentToken.isEmpty()) {
+                tokens.add(currentToken.toString());
+                currentToken.setLength(0);
             }
         }
-        if (!current.isEmpty()) {
-            parts.add(current.toString());
+        if (!currentToken.isEmpty()) {
+            tokens.add(currentToken.toString());
         }
-        return parts;
+        return tokens;
     }
 
     private static boolean isValidRustIdentifierStart(char ch) {
         return Character.isLetter(ch) || ch == '_';
     }
 
-    private static boolean isBeuMainGitSelection(String value) {
-        return BEU_MAIN_GIT_OPTION.equals(value) || "main".equalsIgnoreCase(value == null ? "" : value.trim());
+    private static boolean isBeuMainGitSelection(String selectedVersion) {
+        return BEU_MAIN_GIT_OPTION.equals(selectedVersion)
+                || "main".equalsIgnoreCase(selectedVersion == null ? "" : selectedVersion.trim());
     }
 
     private record DependencySpec(String sourceType, String version, String gitUrl, String branch, List<String> features) {

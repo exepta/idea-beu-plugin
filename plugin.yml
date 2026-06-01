@@ -1,0 +1,6 @@
+id: com.tiltus.beu.parser
+name: Bevy HTML Support
+description: |
+  RustRover plugin for Bevy and bevy_extended_ui workflows.
+  Includes a Bevy project wizard, Beu Component file generation,
+  and HTML tooling support for bevy_extended_ui templates.

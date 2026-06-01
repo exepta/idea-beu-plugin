@@ -41,9 +41,9 @@ public final class BevyNewProjectWizard implements LanguageGeneratorNewProjectWi
     }
 
     private static final class Step extends AbstractNewProjectWizardStep {
-        private final BevyProjectGeneratorPeer peer = new BevyProjectGeneratorPeer();
-        private final BevyDirectoryProjectGenerator generator = new BevyDirectoryProjectGenerator();
-        private final JComponent peerComponent = peer.getComponent();
+        private final BevyProjectGeneratorPeer projectGeneratorPeer = new BevyProjectGeneratorPeer();
+        private final BevyDirectoryProjectGenerator projectGenerator = new BevyDirectoryProjectGenerator();
+        private final JComponent settingsComponent = projectGeneratorPeer.getComponent();
 
         private Step(NewProjectWizardStep parent) {
             super(parent);
@@ -52,9 +52,9 @@ public final class BevyNewProjectWizard implements LanguageGeneratorNewProjectWi
         @Override
         public void setupUI(@NotNull Panel panel) {
             panel.row((JLabel) null, row -> {
-                row.cell(peerComponent)
+                row.cell(settingsComponent)
                         .align(AlignX.FILL)
-                        .validationInfo((builder, component) -> peer.validate());
+                        .validationInfo((builder, component) -> projectGeneratorPeer.validate());
                 return Unit.INSTANCE;
             });
         }
@@ -77,13 +77,13 @@ public final class BevyNewProjectWizard implements LanguageGeneratorNewProjectWi
                 return;
             }
 
-            ValidationInfo validation = peer.validate();
+            ValidationInfo validation = projectGeneratorPeer.validate();
             if (validation != null) {
                 return;
             }
 
-            BevyProjectSettings settings = peer.getSettings();
-            generator.generateProject(project, baseDir, settings, null);
+            BevyProjectSettings settings = projectGeneratorPeer.getSettings();
+            projectGenerator.generateProject(project, baseDir, settings, null);
         }
     }
 }

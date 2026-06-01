@@ -47,13 +47,13 @@ final class BeuHtmlUseResolver {
         return bindings.get(objectName.toLowerCase(Locale.ROOT));
     }
 
-    private static Map<String, String> parseBindings(String text) {
+    private static Map<String, String> parseBindings(String htmlText) {
         Map<String, String> bindings = new LinkedHashMap<>();
-        if (text == null || text.isEmpty() || !text.contains("@use")) {
+        if (htmlText == null || htmlText.isEmpty() || !htmlText.contains("@use")) {
             return bindings;
         }
 
-        Matcher matcher = USE_PATTERN.matcher(text);
+        Matcher matcher = USE_PATTERN.matcher(htmlText);
         while (matcher.find()) {
             String structName = matcher.group(1);
             String alias = matcher.group(2);
