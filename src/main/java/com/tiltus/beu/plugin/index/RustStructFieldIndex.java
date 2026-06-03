@@ -19,12 +19,24 @@ public final class RustStructFieldIndex {
         return RustBeuIndex.get(project).fieldsForStructName(structName);
     }
 
+    public List<String> methodsForStructName(String structName) {
+        return RustBeuIndex.get(project).methodsForStructName(structName);
+    }
+
     public String structDocForStructName(String structName) {
         return RustBeuIndex.get(project).structDocForStructName(structName);
     }
 
     public String fieldDocForStructAndField(String structName, String fieldName) {
         return RustBeuIndex.get(project).fieldDocForStructAndField(structName, fieldName);
+    }
+
+    public String fieldTypeForStructAndField(String structName, String fieldName) {
+        return RustBeuIndex.get(project).fieldTypeForStructAndField(structName, fieldName);
+    }
+
+    public String methodDocForStructAndMethod(String structName, String methodName) {
+        return RustBeuIndex.get(project).methodDocForStructAndMethod(structName, methodName);
     }
 
     public String resolveStructNameForObject(String objectName, String preferredStructName, boolean allowDeepSearch) {

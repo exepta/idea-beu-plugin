@@ -1,6 +1,7 @@
 package com.tiltus.beu.plugin.html;
 
 import com.intellij.codeInsight.completion.CompletionContributor;
+import com.intellij.codeInsight.completion.InsertionContext;
 import com.intellij.codeInsight.completion.CompletionParameters;
 import com.intellij.codeInsight.completion.CompletionProvider;
 import com.intellij.codeInsight.completion.CompletionResultSet;
@@ -16,6 +17,7 @@ import com.intellij.psi.xml.XmlText;
 import com.intellij.util.ProcessingContext;
 import com.tiltus.beu.plugin.index.RustStructFieldIndex;
 import com.tiltus.beu.plugin.index.RustUiComponentIndex;
+import com.tiltus.beu.plugin.index.RustUsePathIndex;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.LinkedHashSet;
@@ -33,6 +35,14 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
         }
     }
 
+    private static final class UsePathContext {
+        private final String typedPrefix;
+
+        private UsePathContext(String typedPrefix) {
+            this.typedPrefix = typedPrefix;
+        }
+    }
+
     public BeuHtmlCompletionContributor() {
         extend(CompletionType.BASIC, PlatformPatterns.psiElement(), new CompletionProvider<>() {
             @Override
@@ -43,6 +53,7 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
             ) {
                 PsiElement position = parameters.getPosition();
                 if (isExpressionTextContext(position)) {
+                    addUseDirectivePathCompletions(parameters, result);
                     addDirectiveCompletions(result);
                     addRustStructFieldCompletions(parameters, result);
                 }
@@ -133,10 +144,50 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
         CompletionResultSet prefixedResult = result.withPrefixMatcher(objectAccess.fieldPrefix);
 
         List<String> fields = index.fieldsForStructName(structName);
+        List<String> methods = index.methodsForStructName(structName);
+        Set<String> emitted = new LinkedHashSet<>();
         for (String field : fields) {
+            if (!emitted.add(field)) {
+                continue;
+            }
+            String fieldType = index.fieldTypeForStructAndField(structName, field);
             prefixedResult.addElement(
                     LookupElementBuilder.create(field)
-                            .withTypeText("Rust struct field", true)
+                            .withTypeText(fieldType == null || fieldType.isBlank() ? "value" : fieldType, true)
+            );
+        }
+        for (String method : methods) {
+            if (!emitted.add(method)) {
+                continue;
+            }
+            prefixedResult.addElement(
+                    LookupElementBuilder.create(method)
+                            .withTypeText("fn", true)
+                            .withTailText("()", true)
+                            .withInsertHandler((insertionContext, item) -> ensureMethodCallSuffix(insertionContext))
+            );
+        }
+    }
+
+    private static void addUseDirectivePathCompletions(CompletionParameters parameters, CompletionResultSet result) {
+        UsePathContext context = usePathContext(parameters);
+        if (context == null) {
+            return;
+        }
+
+        CompletionResultSet prefixedResult = result.withPrefixMatcher(context.typedPrefix);
+        List<RustUsePathIndex.PathVariant> variants = RustUsePathIndex.get(parameters.getOriginalFile().getProject())
+                .complete(context.typedPrefix);
+
+        Set<String> emitted = new LinkedHashSet<>();
+        for (RustUsePathIndex.PathVariant variant : variants) {
+            String insertText = variant.insertText();
+            if (!emitted.add(insertText)) {
+                continue;
+            }
+            prefixedResult.addElement(
+                    LookupElementBuilder.create(insertText)
+                            .withTypeText(variant.module() ? "mod" : "item", true)
             );
         }
     }
@@ -242,11 +293,75 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
         return rawTagName;
     }
 
+    private static UsePathContext usePathContext(CompletionParameters parameters) {
+        CharSequence chars = parameters.getEditor().getDocument().getCharsSequence();
+        int caretOffset = Math.min(parameters.getEditor().getCaretModel().getOffset(), chars.length());
+        int lineStart = findLineStart(chars, caretOffset);
+        int lineEnd = findLineEnd(chars, caretOffset);
+        String lineText = chars.subSequence(lineStart, lineEnd).toString();
+        int offsetInLine = caretOffset - lineStart;
+
+        int useIndex = lineText.indexOf("@use");
+        if (useIndex < 0 || useIndex > offsetInLine) {
+            return null;
+        }
+
+        int quoteStart = lineText.indexOf('"', useIndex + 4);
+        if (quoteStart < 0 || offsetInLine <= quoteStart) {
+            return null;
+        }
+
+        int quoteEnd = lineText.indexOf('"', quoteStart + 1);
+        if (quoteEnd >= 0 && offsetInLine > quoteEnd) {
+            return null;
+        }
+
+        String typedPrefix = lineText.substring(quoteStart + 1, offsetInLine);
+        return new UsePathContext(typedPrefix);
+    }
+
+    private static int findLineStart(CharSequence text, int offset) {
+        if (text.isEmpty()) {
+            return 0;
+        }
+        int index = Math.max(0, offset - 1);
+        while (index >= 0) {
+            if (text.charAt(index) == '\n') {
+                return index + 1;
+            }
+            index--;
+        }
+        return 0;
+    }
+
+    private static int findLineEnd(CharSequence text, int offset) {
+        int index = Math.max(0, offset);
+        while (index < text.length()) {
+            if (text.charAt(index) == '\n') {
+                return index;
+            }
+            index++;
+        }
+        return text.length();
+    }
+
     private static boolean isIdentifierChar(char ch) {
         return ch == '_' || Character.isLetterOrDigit(ch);
     }
 
     private static boolean isTagNameChar(char ch) {
         return ch == '_' || ch == '-' || Character.isLetterOrDigit(ch);
+    }
+
+    private static void ensureMethodCallSuffix(InsertionContext context) {
+        int tailOffset = context.getTailOffset();
+        CharSequence chars = context.getDocument().getCharsSequence();
+        if (tailOffset < chars.length() && chars.charAt(tailOffset) == '(') {
+            return;
+        }
+
+        context.getDocument().insertString(tailOffset, "()");
+        context.getEditor().getCaretModel().moveToOffset(tailOffset + 2);
+        context.setTailOffset(tailOffset + 2);
     }
 }

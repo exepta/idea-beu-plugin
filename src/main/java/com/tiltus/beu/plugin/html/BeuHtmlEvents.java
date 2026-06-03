@@ -88,7 +88,15 @@ public final class BeuHtmlEvents {
         if (maybeName == null) {
             return null;
         }
-        return RESOLVED_BY_NAME.get(normalize(maybeName));
+        String normalized = normalize(maybeName);
+        EventDefinition definition = RESOLVED_BY_NAME.get(normalized);
+        if (definition != null) {
+            return definition;
+        }
+        if (!normalized.startsWith("on")) {
+            return RESOLVED_BY_NAME.get("on" + normalized);
+        }
+        return null;
     }
 
     static Collection<EventDefinition> allForTag(String tagName) {
@@ -119,7 +127,11 @@ public final class BeuHtmlEvents {
     }
 
     private static String normalize(String input) {
-        return input.toLowerCase(Locale.ROOT).trim();
+        String normalized = input.toLowerCase(Locale.ROOT).trim();
+        if (normalized.startsWith("on:") && normalized.length() > 3) {
+            normalized = "on" + normalized.substring(3);
+        }
+        return normalized;
     }
 
     private BeuHtmlEvents() {

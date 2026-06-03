@@ -10,31 +10,12 @@ import java.util.Map;
 import java.util.Set;
 
 final class BeuHtmlWidgets {
-    static final class AttributeDefinition {
-        private final String name;
-        private final String description;
-
-        AttributeDefinition(String name, String description) {
-            this.name = name;
-            this.description = description;
-        }
-
-        String name() {
-            return name;
-        }
-
-        String description() {
-            return description;
-        }
-    }
+    record AttributeDefinition(String name, String description) { }
 
     private static final class WidgetDefinition {
-        private final String tag;
         private final Map<String, AttributeDefinition> attributes = new LinkedHashMap<>();
 
-        private WidgetDefinition(String tag) {
-            this.tag = tag;
-        }
+        private WidgetDefinition() {}
 
         void addAttribute(AttributeDefinition definition) {
             attributes.put(definition.name(), definition);
@@ -151,7 +132,8 @@ final class BeuHtmlWidgets {
                 attr("icon", "Optional icon path."),
                 attr("checked", "Boolean checked state."),
                 attr("disabled", "Boolean disabled state."),
-                attr("hidden", "Boolean hidden state.")
+                attr("hidden", "Boolean hidden state."),
+                attr("value", "Switch value used in form data.")
         );
         register("toggle",
                 attr("value", "Toggle value used in form data."),
@@ -164,7 +146,7 @@ final class BeuHtmlWidgets {
 
     private static void register(String tag, AttributeDefinition... attributes) {
         String normalizedTag = normalize(tag);
-        WidgetDefinition definition = new WidgetDefinition(normalizedTag);
+        WidgetDefinition definition = new WidgetDefinition();
         for (AttributeDefinition attribute : attributes) {
             definition.addAttribute(attribute);
         }

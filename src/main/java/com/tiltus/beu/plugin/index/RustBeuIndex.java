@@ -54,11 +54,24 @@ public final class RustBeuIndex {
         private final String doc;
         private final List<String> fields;
         private final Map<String, String> fieldDocs;
+        private final Map<String, String> fieldTypes;
+        private final List<String> methods;
+        private final Map<String, String> methodDocs;
 
-        private StructInfo(String doc, List<String> fields, Map<String, String> fieldDocs) {
+        private StructInfo(
+                String doc,
+                List<String> fields,
+                Map<String, String> fieldDocs,
+                Map<String, String> fieldTypes,
+                List<String> methods,
+                Map<String, String> methodDocs
+        ) {
             this.doc = doc;
             this.fields = fields;
             this.fieldDocs = fieldDocs;
+            this.fieldTypes = fieldTypes;
+            this.methods = methods;
+            this.methodDocs = methodDocs;
         }
     }
 
@@ -93,10 +106,13 @@ public final class RustBeuIndex {
     }
 
     private static final Pattern STRUCT_PATTERN = Pattern.compile(
-            "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?(?<attrs>(?:\\s*#\\[[^\\r\\n]*]\\s*\\R)*)\\s*(?:pub\\s+)?struct\\s+(?<name>[A-Za-z_][\\w]*)\\s*\\{(?<body>.*?)\\}"
+            "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?(?<attrs>(?:\\s*#\\[[^\\r\\n]*]\\s*\\R)*)\\s*(?:pub\\s+)?struct\\s+(?<name>[A-Za-z_][\\w]*)\\b[^\\{;]*\\{(?<body>.*?)\\}"
     );
     private static final Pattern FIELD_PATTERN = Pattern.compile(
             "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?(?:pub(?:\\([^)]*\\))?\\s+)?(?<name>[A-Za-z_][\\w]*)\\s*:"
+    );
+    private static final Pattern PUB_METHOD_PATTERN = Pattern.compile(
+            "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?pub(?:\\([^)]*\\))?\\s+(?:async\\s+)?fn\\s+(?<name>[A-Za-z_][\\w]*)\\s*\\("
     );
     private static final Pattern UI_COMPONENT_STRUCT_PATTERN = Pattern.compile("(?s)#\\[ui_component\\]\\s*(?:pub\\s+)?struct\\s+([A-Za-z_][\\w]*)\\b");
     private static final Pattern TEMPLATE_NAME_PATTERN = Pattern.compile("template_name\\s*:\\s*\"([A-Za-z_][A-Za-z0-9_-]*)\"");
@@ -107,7 +123,7 @@ public final class RustBeuIndex {
             "(?ms)#\\[(?:html_use|html_shared)(?:\\([^\\]]*\\))?\\]\\s*(?:\\s*#\\[[^\\n]*]\\s*\\R)*\\s*(?:pub\\s+)?(?:struct|enum|type)\\s+([A-Za-z_][\\w]*)\\b"
     );
     private static final Pattern EXPOSED_ATTR_PATTERN = Pattern.compile("#\\[(?:html_use|html_shared)(?:\\([^\\]]*\\))?\\]");
-    private static final StructInfo MISSING_STRUCT = new StructInfo(null, List.of(), Map.of());
+    private static final StructInfo MISSING_STRUCT = new StructInfo(null, List.of(), Map.of(), Map.of(), List.of(), Map.of());
     private static final Snapshot EMPTY_SNAPSHOT = new Snapshot(List.of(), Map.of(), Map.of(), Map.of());
     private static final long REBUILD_DEBOUNCE_NANOS = 30_000_000_000L;
     private static final int MAX_FILES_TO_SCAN = 1500;
@@ -206,17 +222,38 @@ public final class RustBeuIndex {
         return info == null ? List.of() : info.fields;
     }
 
+    public List<String> methodsForStructName(String structName) {
+        StructInfo info = resolveStructInfo(structName, true);
+        return info == null ? List.of() : info.methods;
+    }
+
     public String structDocForStructName(String structName) {
-        StructInfo info = resolveStructInfo(structName, false);
+        StructInfo info = resolveStructInfo(structName, true);
         return info == null ? null : info.doc;
     }
 
     public String fieldDocForStructAndField(String structName, String fieldName) {
-        StructInfo info = resolveStructInfo(structName, false);
+        StructInfo info = resolveStructInfo(structName, true);
         if (info == null || fieldName == null || fieldName.isBlank()) {
             return null;
         }
         return info.fieldDocs.get(fieldName.toLowerCase(Locale.ROOT));
+    }
+
+    public String fieldTypeForStructAndField(String structName, String fieldName) {
+        StructInfo info = resolveStructInfo(structName, true);
+        if (info == null || fieldName == null || fieldName.isBlank()) {
+            return null;
+        }
+        return info.fieldTypes.get(fieldName.toLowerCase(Locale.ROOT));
+    }
+
+    public String methodDocForStructAndMethod(String structName, String methodName) {
+        StructInfo info = resolveStructInfo(structName, true);
+        if (info == null || methodName == null || methodName.isBlank()) {
+            return null;
+        }
+        return info.methodDocs.get(methodName.toLowerCase(Locale.ROOT));
     }
 
     public String resolveStructNameForObject(String objectName, String preferredStructName, boolean allowDeepPreferredLookup) {
@@ -235,7 +272,7 @@ public final class RustBeuIndex {
         }
 
         for (String typeName : exposedTypes) {
-            if (resolveStructInfo(typeName, false) != null) {
+            if (resolveStructInfo(typeName, allowDeepPreferredLookup) != null) {
                 return typeName;
             }
         }
@@ -273,7 +310,12 @@ public final class RustBeuIndex {
 
             StructInfo cachedStructInfo = cache.structInfoByName.get(key);
             if (cachedStructInfo != null) {
-                return cachedStructInfo == MISSING_STRUCT ? null : cachedStructInfo;
+                if (cachedStructInfo != MISSING_STRUCT) {
+                    return cachedStructInfo;
+                }
+                if (!allowDeepSearch) {
+                    return null;
+                }
             }
 
             StructInfo snapshotStructInfo = snapshot.exposedStructInfoByName.get(key);
@@ -370,17 +412,29 @@ public final class RustBeuIndex {
             return null;
         }
 
+        StructInfo structInfo = null;
+        Set<String> methodNames = new LinkedHashSet<>();
+        Map<String, String> methodDocs = new LinkedHashMap<>();
         for (VirtualFile file : candidateFiles) {
             String text = loadText(file);
-            if (text == null || text.isEmpty() || !text.contains("struct") || !text.contains(structName)) {
+            if (text == null || text.isEmpty() || !text.contains(structName)) {
                 continue;
             }
-            StructInfo info = findStructInText(text, structName);
-            if (info != null) {
-                return info;
+
+            if (structInfo == null && text.contains("struct")) {
+                structInfo = findStructInText(text, structName);
+            }
+            if (text.contains("impl") && text.contains("fn")) {
+                collectPublicMethodsFromImpls(text, structName, methodNames, methodDocs);
             }
         }
-        return null;
+        if (structInfo == null) {
+            if (methodNames.isEmpty()) {
+                return null;
+            }
+            return new StructInfo(null, List.of(), Map.of(), Map.of(), List.copyOf(methodNames), Map.copyOf(methodDocs));
+        }
+        return withMethods(structInfo, methodNames, methodDocs);
     }
 
     private List<VirtualFile> findCandidateFiles(String structName) {
@@ -432,22 +486,37 @@ public final class RustBeuIndex {
         String structDoc = normalizeRustDoc(docs);
         Set<String> fields = new LinkedHashSet<>();
         Map<String, String> fieldDocs = new LinkedHashMap<>();
+        Map<String, String> fieldTypes = new LinkedHashMap<>();
 
-        Matcher fieldMatcher = FIELD_PATTERN.matcher(body == null ? "" : body);
+        String structBody = body == null ? "" : body;
+        Matcher fieldMatcher = FIELD_PATTERN.matcher(structBody);
         while (fieldMatcher.find()) {
             String fieldName = fieldMatcher.group("name");
             if (fieldName == null || fieldName.isBlank()) {
                 continue;
             }
+            String normalizedFieldName = fieldName.toLowerCase(Locale.ROOT);
             fields.add(fieldName);
 
             String fieldDoc = normalizeRustDoc(fieldMatcher.group("docs"));
             if (fieldDoc != null && !fieldDoc.isBlank()) {
-                fieldDocs.put(fieldName.toLowerCase(Locale.ROOT), fieldDoc);
+                fieldDocs.put(normalizedFieldName, fieldDoc);
+            }
+
+            String fieldType = extractFieldType(structBody, fieldMatcher.end());
+            if (fieldType != null && !fieldType.isBlank()) {
+                fieldTypes.put(normalizedFieldName, fieldType);
             }
         }
 
-        return new StructInfo(structDoc, List.copyOf(fields), Map.copyOf(fieldDocs));
+        return new StructInfo(
+                structDoc,
+                List.copyOf(fields),
+                Map.copyOf(fieldDocs),
+                Map.copyOf(fieldTypes),
+                List.of(),
+                Map.of()
+        );
     }
 
     private static String loadText(VirtualFile file) {
@@ -526,8 +595,244 @@ public final class RustBeuIndex {
             }
 
             StructInfo info = buildStructInfo(structMatcher.group("docs"), structMatcher.group("body"));
-            targetMap.put(structName.toLowerCase(Locale.ROOT), info);
+            targetMap.put(structName.toLowerCase(Locale.ROOT), enrichStructInfoWithMethods(text, structName, info));
         }
+    }
+
+    private static StructInfo enrichStructInfoWithMethods(String text, String structName, StructInfo info) {
+        if (info == null || text == null || text.isEmpty() || structName == null || structName.isBlank()) {
+            return info;
+        }
+
+        Set<String> methods = new LinkedHashSet<>(info.methods);
+        Map<String, String> methodDocs = new LinkedHashMap<>(info.methodDocs);
+        collectPublicMethodsFromImpls(text, structName, methods, methodDocs);
+
+        return withMethods(info, methods, methodDocs);
+    }
+
+    private static StructInfo withMethods(StructInfo base, Set<String> additionalMethods, Map<String, String> additionalMethodDocs) {
+        Set<String> allMethods = new LinkedHashSet<>(base.methods);
+        allMethods.addAll(additionalMethods);
+
+        Map<String, String> allMethodDocs = new LinkedHashMap<>(base.methodDocs);
+        allMethodDocs.putAll(additionalMethodDocs);
+
+        return new StructInfo(
+                base.doc,
+                base.fields,
+                base.fieldDocs,
+                base.fieldTypes,
+                List.copyOf(allMethods),
+                Map.copyOf(allMethodDocs)
+        );
+    }
+
+    private static String extractFieldType(String structBody, int typeStartOffset) {
+        if (structBody == null || structBody.isEmpty()) {
+            return null;
+        }
+        int start = Math.max(0, typeStartOffset);
+        while (start < structBody.length() && Character.isWhitespace(structBody.charAt(start))) {
+            start++;
+        }
+        if (start >= structBody.length()) {
+            return null;
+        }
+
+        int angleDepth = 0;
+        int parenDepth = 0;
+        int squareDepth = 0;
+        int braceDepth = 0;
+        boolean inString = false;
+        boolean inChar = false;
+        boolean escaping = false;
+
+        for (int index = start; index < structBody.length(); index++) {
+            char ch = structBody.charAt(index);
+
+            if (inString) {
+                if (escaping) {
+                    escaping = false;
+                } else if (ch == '\\') {
+                    escaping = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (inChar) {
+                if (escaping) {
+                    escaping = false;
+                } else if (ch == '\\') {
+                    escaping = true;
+                } else if (ch == '\'') {
+                    inChar = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+            if (ch == '\'') {
+                inChar = true;
+                continue;
+            }
+
+            if (ch == '<') {
+                angleDepth++;
+                continue;
+            }
+            if (ch == '>') {
+                if (angleDepth > 0) {
+                    angleDepth--;
+                }
+                continue;
+            }
+            if (ch == '(') {
+                parenDepth++;
+                continue;
+            }
+            if (ch == ')') {
+                if (parenDepth > 0) {
+                    parenDepth--;
+                }
+                continue;
+            }
+            if (ch == '[') {
+                squareDepth++;
+                continue;
+            }
+            if (ch == ']') {
+                if (squareDepth > 0) {
+                    squareDepth--;
+                }
+                continue;
+            }
+            if (ch == '{') {
+                braceDepth++;
+                continue;
+            }
+            if (ch == '}') {
+                if (braceDepth > 0) {
+                    braceDepth--;
+                } else {
+                    return normalizeFieldType(structBody.substring(start, index));
+                }
+                continue;
+            }
+            if (ch == ',' && angleDepth == 0 && parenDepth == 0 && squareDepth == 0 && braceDepth == 0) {
+                return normalizeFieldType(structBody.substring(start, index));
+            }
+        }
+
+        return normalizeFieldType(structBody.substring(start));
+    }
+
+    private static String normalizeFieldType(String rawType) {
+        if (rawType == null) {
+            return null;
+        }
+        String normalized = rawType.trim();
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        normalized = normalized.replaceAll("\\s+", " ");
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private static void collectPublicMethodsFromImpls(
+            String text,
+            String structName,
+            Set<String> methodNames,
+            Map<String, String> methodDocs
+    ) {
+        int searchOffset = 0;
+        while (searchOffset < text.length()) {
+            int implStart = text.indexOf("impl", searchOffset);
+            if (implStart < 0) {
+                return;
+            }
+            if (!isIdentifierBoundary(text, implStart, implStart + 4)) {
+                searchOffset = implStart + 4;
+                continue;
+            }
+
+            int headerEnd = text.indexOf('{', implStart + 4);
+            if (headerEnd < 0) {
+                return;
+            }
+
+            int blockEnd = findMatchingBrace(text, headerEnd);
+            if (blockEnd < 0) {
+                return;
+            }
+
+            String header = text.substring(implStart, headerEnd);
+            if (matchesImplHeaderForStruct(header, structName)) {
+                String body = text.substring(headerEnd + 1, blockEnd);
+                Matcher methodMatcher = PUB_METHOD_PATTERN.matcher(body);
+                while (methodMatcher.find()) {
+                    String methodName = methodMatcher.group("name");
+                    if (methodName == null || methodName.isBlank()) {
+                        continue;
+                    }
+                    methodNames.add(methodName);
+
+                    String methodDoc = normalizeRustDoc(methodMatcher.group("docs"));
+                    if (methodDoc != null && !methodDoc.isBlank()) {
+                        methodDocs.put(methodName.toLowerCase(Locale.ROOT), methodDoc);
+                    }
+                }
+            }
+
+            searchOffset = blockEnd + 1;
+        }
+    }
+
+    private static boolean matchesImplHeaderForStruct(String header, String structName) {
+        if (header == null || header.isBlank() || structName == null || structName.isBlank()) {
+            return false;
+        }
+
+        String structPattern = "(?:[A-Za-z_][\\w]*::)*" + Pattern.quote(structName) + "(?:\\b|\\s*<)";
+        Pattern inherentImplPattern = Pattern.compile("\\bimpl(?:\\s*<[^>]*>)?\\s+" + structPattern);
+        if (inherentImplPattern.matcher(header).find()) {
+            return true;
+        }
+
+        Pattern traitImplPattern = Pattern.compile("\\bfor\\s+" + structPattern);
+        return traitImplPattern.matcher(header).find();
+    }
+
+    private static int findMatchingBrace(String text, int openBraceIndex) {
+        int depth = 0;
+        for (int i = openBraceIndex; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '{') {
+                depth++;
+            } else if (ch == '}') {
+                depth--;
+                if (depth == 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isIdentifierBoundary(String text, int start, int end) {
+        if (start > 0 && isIdentifierChar(text.charAt(start - 1))) {
+            return false;
+        }
+        return end >= text.length() || !isIdentifierChar(text.charAt(end));
+    }
+
+    private static boolean isIdentifierChar(char ch) {
+        return ch == '_' || Character.isLetterOrDigit(ch);
     }
 
     private static void addExposedAlias(Map<String, Set<String>> targetMap, String alias, String typeName) {

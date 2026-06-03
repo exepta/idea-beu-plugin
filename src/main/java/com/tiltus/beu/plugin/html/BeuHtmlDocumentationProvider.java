@@ -175,14 +175,19 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
         if (context.hoveringField && context.fieldName != null) {
             String fieldDoc = index.fieldDocForStructAndField(structName, context.fieldName);
             if (fieldDoc != null && !fieldDoc.isBlank()) {
-                return "<p><b>rust:</b></p><ul><li>" + escapeHtml(fieldDoc).replace("\n", "<br/>") + "</li></ul>";
+                return "<p><b>rust:</b></p>" + renderMarkdown(fieldDoc);
+            }
+
+            String methodDoc = index.methodDocForStructAndMethod(structName, context.fieldName);
+            if (methodDoc != null && !methodDoc.isBlank()) {
+                return "<p><b>rust:</b></p>" + renderMarkdown(methodDoc);
             }
         }
 
         if (context.hoveringObject) {
             String structDoc = index.structDocForStructName(structName);
             if (structDoc != null && !structDoc.isBlank()) {
-                return "<p><b>rust:</b></p><ul><li>" + escapeHtml(structDoc).replace("\n", "<br/>") + "</li></ul>";
+                return "<p><b>rust:</b></p>" + renderMarkdown(structDoc);
             }
         }
 
@@ -222,6 +227,116 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
                 .replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;");
+    }
+
+    private static String renderMarkdown(String markdown) {
+        if (markdown == null || markdown.isBlank()) {
+            return "";
+        }
+
+        String[] lines = markdown.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+        StringBuilder html = new StringBuilder();
+        StringBuilder paragraph = new StringBuilder();
+        List<String> listItems = new ArrayList<>();
+
+        for (String rawLine : lines) {
+            String line = rawLine == null ? "" : rawLine.stripTrailing();
+            String trimmed = line.trim();
+
+            if (trimmed.isEmpty()) {
+                flushParagraph(html, paragraph);
+                flushList(html, listItems);
+                continue;
+            }
+
+            int headingLevel = headingLevel(trimmed);
+            if (headingLevel > 0) {
+                flushParagraph(html, paragraph);
+                flushList(html, listItems);
+                String content = trimmed.substring(Math.min(headingLevel + 1, trimmed.length())).trim();
+                html.append("<h").append(headingLevel).append(">")
+                        .append(renderInlineMarkdown(content))
+                        .append("</h").append(headingLevel).append(">");
+                continue;
+            }
+
+            if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+                flushParagraph(html, paragraph);
+                listItems.add(trimmed.substring(2).trim());
+                continue;
+            }
+
+            if (!paragraph.isEmpty()) {
+                paragraph.append('\n');
+            }
+            paragraph.append(trimmed);
+        }
+
+        flushParagraph(html, paragraph);
+        flushList(html, listItems);
+        return html.toString();
+    }
+
+    private static int headingLevel(String line) {
+        int level = 0;
+        while (level < line.length() && line.charAt(level) == '#') {
+            level++;
+        }
+        if (level == 0 || level > 6) {
+            return 0;
+        }
+        if (level < line.length() && !Character.isWhitespace(line.charAt(level))) {
+            return 0;
+        }
+        return level;
+    }
+
+    private static void flushParagraph(StringBuilder html, StringBuilder paragraph) {
+        if (paragraph.isEmpty()) {
+            return;
+        }
+        html.append("<p>").append(renderInlineMarkdown(paragraph.toString())).append("</p>");
+        paragraph.setLength(0);
+    }
+
+    private static void flushList(StringBuilder html, List<String> items) {
+        if (items.isEmpty()) {
+            return;
+        }
+        html.append("<ul>");
+        for (String item : items) {
+            html.append("<li>").append(renderInlineMarkdown(item)).append("</li>");
+        }
+        html.append("</ul>");
+        items.clear();
+    }
+
+    private static String renderInlineMarkdown(String text) {
+        String escaped = escapeHtml(text);
+        if (escaped.isEmpty()) {
+            return escaped;
+        }
+
+        StringBuilder result = new StringBuilder();
+        boolean inCode = false;
+        for (int i = 0; i < escaped.length(); i++) {
+            char ch = escaped.charAt(i);
+            if (ch == '`') {
+                if (inCode) {
+                    result.append("</code>");
+                } else {
+                    result.append("<code>");
+                }
+                inCode = !inCode;
+                continue;
+            }
+            result.append(ch);
+        }
+        if (inCode) {
+            result.append("</code>");
+        }
+
+        return result.toString().replace("\n", "<br/>");
     }
 
     private static ObjectAccessContext objectAccessContextAt(String text, int rawOffset) {

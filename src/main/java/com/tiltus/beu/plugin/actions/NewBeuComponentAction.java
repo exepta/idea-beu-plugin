@@ -334,6 +334,7 @@ public final class NewBeuComponentAction extends AnAction {
                 "    styles: &[\"" + componentName + ".component.css\"],\n" +
                 "};\n" +
                 "\n" +
+                "/// Called at initialize the component. You can register or define for example resources here!\n" +
                 "#[component_init]\n" +
                 "pub fn constructor(mut commands: Commands) {\n" +
                 "}\n";
