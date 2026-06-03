@@ -59,6 +59,16 @@ public final class BeuHtmlStructReferenceContributor extends PsiReferenceContrib
         }
     }
 
+    private static final class UseSegment {
+        private final int startOffset;
+        private final int endOffset;
+
+        private UseSegment(int startOffset, int endOffset) {
+            this.startOffset = startOffset;
+            this.endOffset = endOffset;
+        }
+    }
+
     private static final Pattern USE_PATTERN = Pattern.compile(
             "@use\\s+\"(?<path>[^\"]+)\"(?:\\s+as\\s+(?<alias>[A-Za-z_][\\w]*))?\\s*;?"
     );
@@ -174,7 +184,80 @@ public final class BeuHtmlStructReferenceContributor extends PsiReferenceContrib
                     null,
                     null
             ));
+
+            String alias = matcher.group("alias");
+            if (alias != null && !alias.isBlank()) {
+                int aliasStart = matcher.start("alias");
+                int aliasEnd = matcher.end("alias");
+                references.add(new ReferenceCandidate(
+                        aliasStart,
+                        aliasEnd,
+                        ReferenceKind.STRUCT,
+                        alias,
+                        null,
+                        null,
+                        null,
+                        null
+                ));
+            }
+
+            for (UseSegment segment : usePathPrefixSegments(path, info.typeOffset)) {
+                int segmentStart = pathStart + segment.startOffset;
+                int segmentEnd = pathStart + segment.endOffset;
+                references.add(new ReferenceCandidate(
+                        segmentStart,
+                        segmentEnd,
+                        ReferenceKind.STRUCT,
+                        null,
+                        info.typeName,
+                        null,
+                        null,
+                        null
+                ));
+            }
         }
+    }
+
+    private static List<UseSegment> usePathPrefixSegments(String rawPath, int typeOffset) {
+        if (rawPath == null || rawPath.isBlank() || typeOffset <= 0) {
+            return List.of();
+        }
+
+        int scanEnd = Math.max(0, Math.min(typeOffset, rawPath.length()));
+        String prefix = rawPath.substring(0, scanEnd);
+        List<UseSegment> segments = new ArrayList<>();
+        int index = 0;
+        while (index < prefix.length()) {
+            while (index < prefix.length() && Character.isWhitespace(prefix.charAt(index))) {
+                index++;
+            }
+            if (index >= prefix.length()) {
+                break;
+            }
+
+            int segmentStart = index;
+            while (index < prefix.length()) {
+                char ch = prefix.charAt(index);
+                if (ch == ':' || Character.isWhitespace(ch)) {
+                    break;
+                }
+                index++;
+            }
+            int segmentEnd = index;
+            if (segmentEnd > segmentStart) {
+                segments.add(new UseSegment(segmentStart, segmentEnd));
+            }
+
+            while (index < prefix.length() && Character.isWhitespace(prefix.charAt(index))) {
+                index++;
+            }
+            if (index + 1 < prefix.length() && prefix.charAt(index) == ':' && prefix.charAt(index + 1) == ':') {
+                index += 2;
+            } else if (index < prefix.length() && prefix.charAt(index) == ':') {
+                index++;
+            }
+        }
+        return segments;
     }
 
     private static void collectObjectAndMemberReferences(String text, List<ReferenceCandidate> references) {
