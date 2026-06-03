@@ -472,7 +472,8 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
     private static String buildComponentRust(String componentName) {
         String structName = toPascalIdentifier(componentName) + "Component";
         String constName = toUpperSnakeIdentifier(componentName) + "_COMPONENT";
-        return "use bevy_extended_ui_macros::*;\n" +
+        return "use bevy::prelude::*;\n" +
+                "use bevy_extended_ui_macros::*;\n" +
                 "\n" +
                 "#[ui_component]\n" +
                 "pub struct " + structName + " {\n" +
@@ -485,7 +486,11 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
                 "    template_name: \"app-" + componentName + "\",\n" +
                 "    template_file: \"" + componentName + ".component.html\",\n" +
                 "    styles: &[\"" + componentName + ".component.css\"],\n" +
-                "};\n";
+                "};\n" +
+                "\n" +
+                "#[component_init]\n" +
+                "pub fn constructor(mut commands: Commands) {\n" +
+                "}\n";
     }
 
     private static String buildRegistryRs() {
