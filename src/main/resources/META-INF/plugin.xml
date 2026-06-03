@@ -25,6 +25,9 @@
         <enterHandlerDelegate implementationClass="com.tiltus.beu.plugin.format.BeuDirectiveEnterHandler"/>
         <copyPastePreProcessor implementationClass="com.tiltus.beu.plugin.format.BeuDirectiveCopyPastePreProcessor"/>
         <psi.referenceContributor language="HTML" implementation="com.tiltus.beu.plugin.references.BeuHtmlFnReferenceContributor"/>
+        <psi.referenceContributor language="XML" implementation="com.tiltus.beu.plugin.references.BeuHtmlFnReferenceContributor"/>
+        <psi.referenceContributor language="HTML" implementation="com.tiltus.beu.plugin.references.BeuHtmlStructReferenceContributor"/>
+        <psi.referenceContributor language="XML" implementation="com.tiltus.beu.plugin.references.BeuHtmlStructReferenceContributor"/>
         <lang.inspectionSuppressor language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlInspectionSuppressor"/>
         <directoryProjectGenerator implementation="com.tiltus.beu.plugin.project.BevyDirectoryProjectGenerator"/>
         <newProjectWizard.languageGenerator implementation="com.tiltus.beu.plugin.project.BevyNewProjectWizard"/>

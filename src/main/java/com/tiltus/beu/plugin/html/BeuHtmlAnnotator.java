@@ -16,8 +16,11 @@ import java.util.regex.Pattern;
 
 public final class BeuHtmlAnnotator implements Annotator {
     private static final Pattern DIRECTIVE_PATTERN = Pattern.compile("@(use|for|if|else)\\b");
-    private static final Pattern USE_STATEMENT_PATTERN = Pattern.compile("@use\\s+(\"(?:[^\"\\\\]|\\\\.)*\")\\s+(as)\\b");
+    private static final Pattern USE_STATEMENT_PATTERN = Pattern.compile(
+            "@use\\s+(\"(?:[^\"\\\\]|\\\\.)*\")(?:\\s+(as)\\s+[A-Za-z_][\\w]*)?\\s*(;)?"
+    );
     private static final Pattern OBJECT_ATTRIBUTE_PATTERN = Pattern.compile("\\b([A-Za-z_][\\w]*)\\.([A-Za-z_][\\w]*)\\b");
+    private static final Pattern ENUM_VARIANT_PATTERN = Pattern.compile("\\b[A-Z][\\w]*::([A-Z][\\w]*)\\b");
 
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
@@ -62,12 +65,22 @@ public final class BeuHtmlAnnotator implements Annotator {
                     startOffset + useMatcher.end(1),
                     BeuHtmlHighlighting.USE_STRING
             );
-            annotateRange(
-                    holder,
-                    startOffset + useMatcher.start(2),
-                    startOffset + useMatcher.end(2),
-                    BeuHtmlHighlighting.DIRECTIVE_KEYWORD
-            );
+            if (useMatcher.start(2) >= 0) {
+                annotateRange(
+                        holder,
+                        startOffset + useMatcher.start(2),
+                        startOffset + useMatcher.end(2),
+                        BeuHtmlHighlighting.DIRECTIVE_KEYWORD
+                );
+            }
+            if (useMatcher.start(3) >= 0) {
+                annotateRange(
+                        holder,
+                        startOffset + useMatcher.start(3),
+                        startOffset + useMatcher.end(3),
+                        BeuHtmlHighlighting.USE_PUNCTUATION
+                );
+            }
         }
 
         Matcher objectAttributeMatcher = OBJECT_ATTRIBUTE_PATTERN.matcher(text);
@@ -83,6 +96,16 @@ public final class BeuHtmlAnnotator implements Annotator {
                     startOffset + objectAttributeMatcher.start(2),
                     startOffset + objectAttributeMatcher.end(2),
                     BeuHtmlHighlighting.OBJECT_ATTRIBUTE
+            );
+        }
+
+        Matcher enumVariantMatcher = ENUM_VARIANT_PATTERN.matcher(text);
+        while (enumVariantMatcher.find()) {
+            annotateRange(
+                    holder,
+                    startOffset + enumVariantMatcher.start(1),
+                    startOffset + enumVariantMatcher.end(1),
+                    BeuHtmlHighlighting.ENUM_VARIANT
             );
         }
     }

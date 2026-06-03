@@ -14,9 +14,13 @@ import com.tiltus.beu.plugin.index.RustStructFieldIndex;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 public final class BeuHtmlDocumentationProvider extends AbstractDocumentationProvider {
     private static final Key<Integer> HOVER_OFFSET_KEY = Key.create("beu.hover.offset");
+    private static final Set<String> RESERVED_IDENTIFIERS = Set.of(
+            "if", "else", "for", "use", "as", "match", "let", "crate", "self", "super", "true", "false"
+    );
 
     private static final class ObjectAccessContext {
         private final String objectName;
@@ -173,6 +177,11 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
         }
 
         if (context.hoveringField && context.fieldName != null) {
+            String variantDoc = index.enumVariantDocForEnumAndVariant(structName, context.fieldName);
+            if (variantDoc != null && !variantDoc.isBlank()) {
+                return "<p><b>rust:</b></p>" + renderMarkdown(variantDoc);
+            }
+
             String fieldDoc = index.fieldDocForStructAndField(structName, context.fieldName);
             if (fieldDoc != null && !fieldDoc.isBlank()) {
                 return "<p><b>rust:</b></p>" + renderMarkdown(fieldDoc);
@@ -185,9 +194,9 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
         }
 
         if (context.hoveringObject) {
-            String structDoc = index.structDocForStructName(structName);
-            if (structDoc != null && !structDoc.isBlank()) {
-                return "<p><b>rust:</b></p>" + renderMarkdown(structDoc);
+            String typeDoc = index.typeDocForName(structName);
+            if (typeDoc != null && !typeDoc.isBlank()) {
+                return "<p><b>rust:</b></p>" + renderMarkdown(typeDoc);
             }
         }
 
@@ -369,6 +378,8 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
 
         boolean hasLeftDot = left >= 0 && text.charAt(left) == '.';
         boolean hasRightDot = right < text.length() && text.charAt(right) == '.';
+        boolean hasLeftDoubleColon = hasDoubleColonToLeft(text, tokenStart);
+        boolean hasRightDoubleColon = hasDoubleColonToRight(text, tokenEnd);
 
         if (hasLeftDot) {
             int objectEnd = skipWhitespaceLeft(text, left - 1);
@@ -400,7 +411,22 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
             return new ObjectAccessContext(token, fieldName, true, false);
         }
 
-        return null;
+        if (hasLeftDoubleColon) {
+            String enumName = typeNameLeftOfDoubleColon(text, tokenStart);
+            if (enumName == null || enumName.isBlank()) {
+                return null;
+            }
+            return new ObjectAccessContext(enumName, token, false, true);
+        }
+
+        if (hasRightDoubleColon) {
+            return new ObjectAccessContext(token, null, true, false);
+        }
+
+        if (RESERVED_IDENTIFIERS.contains(token)) {
+            return null;
+        }
+        return new ObjectAccessContext(token, null, true, false);
     }
 
     private static int skipWhitespaceLeft(String text, int start) {
@@ -417,6 +443,45 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
             index++;
         }
         return index;
+    }
+
+    private static boolean hasDoubleColonToLeft(String text, int tokenStart) {
+        int firstColon = skipWhitespaceLeft(text, tokenStart - 1);
+        if (firstColon < 0 || text.charAt(firstColon) != ':') {
+            return false;
+        }
+        int secondColon = skipWhitespaceLeft(text, firstColon - 1);
+        return secondColon >= 0 && text.charAt(secondColon) == ':';
+    }
+
+    private static boolean hasDoubleColonToRight(String text, int tokenEnd) {
+        int firstColon = skipWhitespaceRight(text, tokenEnd);
+        if (firstColon >= text.length() || text.charAt(firstColon) != ':') {
+            return false;
+        }
+        int secondColon = skipWhitespaceRight(text, firstColon + 1);
+        return secondColon < text.length() && text.charAt(secondColon) == ':';
+    }
+
+    private static String typeNameLeftOfDoubleColon(String text, int tokenStart) {
+        int rightColon = skipWhitespaceLeft(text, tokenStart - 1);
+        if (rightColon < 0 || text.charAt(rightColon) != ':') {
+            return null;
+        }
+        int leftColon = skipWhitespaceLeft(text, rightColon - 1);
+        if (leftColon < 0 || text.charAt(leftColon) != ':') {
+            return null;
+        }
+
+        int typeEnd = skipWhitespaceLeft(text, leftColon - 1);
+        if (typeEnd < 0 || !isIdentifierChar(text.charAt(typeEnd))) {
+            return null;
+        }
+        int typeStart = typeEnd;
+        while (typeStart > 0 && isIdentifierChar(text.charAt(typeStart - 1))) {
+            typeStart--;
+        }
+        return text.substring(typeStart, typeEnd + 1);
     }
 
     private static boolean isIdentifierChar(char ch) {

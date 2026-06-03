@@ -14,6 +14,7 @@ import com.intellij.psi.xml.XmlAttribute;
 import com.intellij.psi.xml.XmlAttributeValue;
 import com.intellij.psi.xml.XmlTag;
 import com.intellij.psi.xml.XmlText;
+import com.intellij.util.PlatformIcons;
 import com.intellij.util.ProcessingContext;
 import com.tiltus.beu.plugin.index.RustStructFieldIndex;
 import com.tiltus.beu.plugin.index.RustUiComponentIndex;
@@ -32,6 +33,16 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
         private ObjectAccessPrefix(String objectName, String fieldPrefix) {
             this.objectName = objectName;
             this.fieldPrefix = fieldPrefix;
+        }
+    }
+
+    private static final class EnumAccessPrefix {
+        private final String enumName;
+        private final String memberPrefix;
+
+        private EnumAccessPrefix(String enumName, String memberPrefix) {
+            this.enumName = enumName;
+            this.memberPrefix = memberPrefix;
         }
     }
 
@@ -56,6 +67,7 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
                     addUseDirectivePathCompletions(parameters, result);
                     addDirectiveCompletions(result);
                     addRustStructFieldCompletions(parameters, result);
+                    addRustEnumMemberCompletions(parameters, result);
                 }
 
                 if (isInAttributeNameArea(position)) {
@@ -153,6 +165,7 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
             String fieldType = index.fieldTypeForStructAndField(structName, field);
             prefixedResult.addElement(
                     LookupElementBuilder.create(field)
+                            .withIcon(PlatformIcons.FIELD_ICON)
                             .withTypeText(fieldType == null || fieldType.isBlank() ? "value" : fieldType, true)
             );
         }
@@ -160,10 +173,14 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
             if (!emitted.add(method)) {
                 continue;
             }
+            String params = index.methodParametersForStructAndMethod(structName, method);
+            String paramsTail = params == null ? "()" : "(" + params + ")";
+            String returnType = index.methodReturnTypeForStructAndMethod(structName, method);
             prefixedResult.addElement(
                     LookupElementBuilder.create(method)
-                            .withTypeText("fn", true)
-                            .withTailText("()", true)
+                            .withIcon(PlatformIcons.METHOD_ICON)
+                            .withTypeText(returnType == null || returnType.isBlank() ? "void" : returnType, true)
+                            .withTailText(paramsTail, true)
                             .withInsertHandler((insertionContext, item) -> ensureMethodCallSuffix(insertionContext))
             );
         }
@@ -188,6 +205,44 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
             prefixedResult.addElement(
                     LookupElementBuilder.create(insertText)
                             .withTypeText(variant.module() ? "mod" : "item", true)
+            );
+        }
+    }
+
+    private static void addRustEnumMemberCompletions(CompletionParameters parameters, CompletionResultSet result) {
+        EnumAccessPrefix enumAccess = enumAccessPrefix(parameters);
+        if (enumAccess == null) {
+            return;
+        }
+
+        RustStructFieldIndex index = RustStructFieldIndex.get(parameters.getOriginalFile().getProject());
+        CompletionResultSet prefixedResult = result.withPrefixMatcher(enumAccess.memberPrefix);
+        Set<String> emitted = new LinkedHashSet<>();
+
+        for (String variant : index.variantsForEnumName(enumAccess.enumName)) {
+            if (!emitted.add(variant)) {
+                continue;
+            }
+            prefixedResult.addElement(
+                    LookupElementBuilder.create(variant)
+                            .withIcon(PlatformIcons.ENUM_ICON)
+                            .withTypeText(enumAccess.enumName, true)
+            );
+        }
+
+        for (String method : index.methodsForStructName(enumAccess.enumName)) {
+            if (!emitted.add(method)) {
+                continue;
+            }
+            String params = index.methodParametersForStructAndMethod(enumAccess.enumName, method);
+            String paramsTail = params == null ? "()" : "(" + params + ")";
+            String returnType = index.methodReturnTypeForStructAndMethod(enumAccess.enumName, method);
+            prefixedResult.addElement(
+                    LookupElementBuilder.create(method)
+                            .withIcon(PlatformIcons.METHOD_ICON)
+                            .withTypeText(returnType == null || returnType.isBlank() ? "void" : returnType, true)
+                            .withTailText(paramsTail, true)
+                            .withInsertHandler((insertionContext, item) -> ensureMethodCallSuffix(insertionContext))
             );
         }
     }
@@ -263,6 +318,57 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
             return null;
         }
         return new ObjectAccessPrefix(objectName, fieldPrefix);
+    }
+
+    private static EnumAccessPrefix enumAccessPrefix(CompletionParameters parameters) {
+        CharSequence documentChars = parameters.getEditor().getDocument().getCharsSequence();
+        int caretOffset = Math.min(parameters.getEditor().getCaretModel().getOffset(), documentChars.length());
+        if (caretOffset <= 0) {
+            return null;
+        }
+
+        int memberEnd = caretOffset;
+        int memberStart = memberEnd;
+        while (memberStart > 0 && isIdentifierChar(documentChars.charAt(memberStart - 1))) {
+            memberStart--;
+        }
+
+        int index = memberStart - 1;
+        while (index >= 0 && Character.isWhitespace(documentChars.charAt(index))) {
+            index--;
+        }
+        if (index < 0 || documentChars.charAt(index) != ':') {
+            return null;
+        }
+
+        index--;
+        while (index >= 0 && Character.isWhitespace(documentChars.charAt(index))) {
+            index--;
+        }
+        if (index < 0 || documentChars.charAt(index) != ':') {
+            return null;
+        }
+
+        index--;
+        while (index >= 0 && Character.isWhitespace(documentChars.charAt(index))) {
+            index--;
+        }
+        if (index < 0 || !isIdentifierChar(documentChars.charAt(index))) {
+            return null;
+        }
+
+        int enumEnd = index;
+        int enumStart = enumEnd;
+        while (enumStart > 0 && isIdentifierChar(documentChars.charAt(enumStart - 1))) {
+            enumStart--;
+        }
+
+        String enumName = documentChars.subSequence(enumStart, enumEnd + 1).toString();
+        String memberPrefix = documentChars.subSequence(memberStart, memberEnd).toString();
+        if (enumName.isBlank()) {
+            return null;
+        }
+        return new EnumAccessPrefix(enumName, memberPrefix);
     }
 
     private static String tagPrefix(CompletionParameters parameters) {

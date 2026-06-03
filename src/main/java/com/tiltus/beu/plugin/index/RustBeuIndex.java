@@ -50,6 +50,24 @@ public final class RustBeuIndex {
         }
     }
 
+    public static final class StructTarget {
+        private final VirtualFile file;
+        private final int offset;
+
+        private StructTarget(VirtualFile file, int offset) {
+            this.file = file;
+            this.offset = offset;
+        }
+
+        public VirtualFile file() {
+            return file;
+        }
+
+        public int offset() {
+            return offset;
+        }
+    }
+
     private static final class StructInfo {
         private final String doc;
         private final List<String> fields;
@@ -57,6 +75,8 @@ public final class RustBeuIndex {
         private final Map<String, String> fieldTypes;
         private final List<String> methods;
         private final Map<String, String> methodDocs;
+        private final Map<String, String> methodParameters;
+        private final Map<String, String> methodReturnTypes;
 
         private StructInfo(
                 String doc,
@@ -64,7 +84,9 @@ public final class RustBeuIndex {
                 Map<String, String> fieldDocs,
                 Map<String, String> fieldTypes,
                 List<String> methods,
-                Map<String, String> methodDocs
+                Map<String, String> methodDocs,
+                Map<String, String> methodParameters,
+                Map<String, String> methodReturnTypes
         ) {
             this.doc = doc;
             this.fields = fields;
@@ -72,6 +94,20 @@ public final class RustBeuIndex {
             this.fieldTypes = fieldTypes;
             this.methods = methods;
             this.methodDocs = methodDocs;
+            this.methodParameters = methodParameters;
+            this.methodReturnTypes = methodReturnTypes;
+        }
+    }
+
+    private static final class EnumVariantInfo {
+        private final String name;
+        private final int offset;
+        private final String doc;
+
+        private EnumVariantInfo(String name, int offset, String doc) {
+            this.name = name;
+            this.offset = offset;
+            this.doc = doc;
         }
     }
 
@@ -108,11 +144,20 @@ public final class RustBeuIndex {
     private static final Pattern STRUCT_PATTERN = Pattern.compile(
             "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?(?<attrs>(?:\\s*#\\[[^\\r\\n]*]\\s*\\R)*)\\s*(?:pub\\s+)?struct\\s+(?<name>[A-Za-z_][\\w]*)\\b[^\\{;]*\\{(?<body>.*?)\\}"
     );
+    private static final Pattern ENUM_PATTERN = Pattern.compile(
+            "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?(?<attrs>(?:\\s*#\\[[^\\r\\n]*]\\s*\\R)*)\\s*(?:pub\\s+)?enum\\s+(?<name>[A-Za-z_][\\w]*)\\b"
+    );
+    private static final Pattern ENUM_WITH_BODY_PATTERN = Pattern.compile(
+            "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?(?<attrs>(?:\\s*#\\[[^\\r\\n]*]\\s*\\R)*)\\s*(?:pub\\s+)?enum\\s+(?<name>[A-Za-z_][\\w]*)\\b[^\\{;]*\\{(?<body>.*?)\\}"
+    );
+    private static final Pattern TYPE_ALIAS_PATTERN = Pattern.compile(
+            "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?(?<attrs>(?:\\s*#\\[[^\\r\\n]*]\\s*\\R)*)\\s*(?:pub\\s+)?type\\s+(?<name>[A-Za-z_][\\w]*)\\b"
+    );
     private static final Pattern FIELD_PATTERN = Pattern.compile(
             "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?(?:pub(?:\\([^)]*\\))?\\s+)?(?<name>[A-Za-z_][\\w]*)\\s*:"
     );
     private static final Pattern PUB_METHOD_PATTERN = Pattern.compile(
-            "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?pub(?:\\([^)]*\\))?\\s+(?:async\\s+)?fn\\s+(?<name>[A-Za-z_][\\w]*)\\s*\\("
+            "(?ms)(?:(?<docs>(?:\\s*///[^\\r\\n]*\\R)+)\\s*)?pub(?:\\([^)]*\\))?\\s+(?:async\\s+)?fn\\s+(?<name>[A-Za-z_][\\w]*)\\s*(?:<[^>]*>\\s*)?\\("
     );
     private static final Pattern UI_COMPONENT_STRUCT_PATTERN = Pattern.compile("(?s)#\\[ui_component\\]\\s*(?:pub\\s+)?struct\\s+([A-Za-z_][\\w]*)\\b");
     private static final Pattern TEMPLATE_NAME_PATTERN = Pattern.compile("template_name\\s*:\\s*\"([A-Za-z_][A-Za-z0-9_-]*)\"");
@@ -123,7 +168,7 @@ public final class RustBeuIndex {
             "(?ms)#\\[(?:html_use|html_shared)(?:\\([^\\]]*\\))?\\]\\s*(?:\\s*#\\[[^\\n]*]\\s*\\R)*\\s*(?:pub\\s+)?(?:struct|enum|type)\\s+([A-Za-z_][\\w]*)\\b"
     );
     private static final Pattern EXPOSED_ATTR_PATTERN = Pattern.compile("#\\[(?:html_use|html_shared)(?:\\([^\\]]*\\))?\\]");
-    private static final StructInfo MISSING_STRUCT = new StructInfo(null, List.of(), Map.of(), Map.of(), List.of(), Map.of());
+    private static final StructInfo MISSING_STRUCT = new StructInfo(null, List.of(), Map.of(), Map.of(), List.of(), Map.of(), Map.of(), Map.of());
     private static final Snapshot EMPTY_SNAPSHOT = new Snapshot(List.of(), Map.of(), Map.of(), Map.of());
     private static final long REBUILD_DEBOUNCE_NANOS = 30_000_000_000L;
     private static final int MAX_FILES_TO_SCAN = 1500;
@@ -232,6 +277,34 @@ public final class RustBeuIndex {
         return info == null ? null : info.doc;
     }
 
+    public String typeDocForName(String typeName) {
+        if (typeName == null || typeName.isBlank()) {
+            return null;
+        }
+
+        StructInfo structInfo = resolveStructInfo(typeName, true);
+        if (structInfo != null && structInfo.doc != null && !structInfo.doc.isBlank()) {
+            return structInfo.doc;
+        }
+
+        List<VirtualFile> candidateFiles = findCandidateFiles(typeName);
+        if (candidateFiles.isEmpty()) {
+            return null;
+        }
+
+        for (VirtualFile file : candidateFiles) {
+            String text = loadText(file);
+            if (text == null || text.isBlank() || !text.contains(typeName)) {
+                continue;
+            }
+            String doc = findTypeDocInText(text, typeName);
+            if (doc != null && !doc.isBlank()) {
+                return doc;
+            }
+        }
+        return null;
+    }
+
     public String fieldDocForStructAndField(String structName, String fieldName) {
         StructInfo info = resolveStructInfo(structName, true);
         if (info == null || fieldName == null || fieldName.isBlank()) {
@@ -256,9 +329,109 @@ public final class RustBeuIndex {
         return info.methodDocs.get(methodName.toLowerCase(Locale.ROOT));
     }
 
+    public String methodParametersForStructAndMethod(String structName, String methodName) {
+        StructInfo info = resolveStructInfo(structName, true);
+        if (info == null || methodName == null || methodName.isBlank()) {
+            return null;
+        }
+        return info.methodParameters.get(methodName.toLowerCase(Locale.ROOT));
+    }
+
+    public String methodReturnTypeForStructAndMethod(String structName, String methodName) {
+        StructInfo info = resolveStructInfo(structName, true);
+        if (info == null || methodName == null || methodName.isBlank()) {
+            return null;
+        }
+        return info.methodReturnTypes.get(methodName.toLowerCase(Locale.ROOT));
+    }
+
+    public List<String> variantsForEnumName(String enumName) {
+        if (enumName == null || enumName.isBlank()) {
+            return List.of();
+        }
+
+        List<VirtualFile> candidateFiles = findCandidateFiles(enumName);
+        if (candidateFiles.isEmpty()) {
+            return List.of();
+        }
+
+        for (VirtualFile file : candidateFiles) {
+            String text = loadText(file);
+            if (text == null || text.isBlank() || !text.contains(enumName) || !text.contains("enum")) {
+                continue;
+            }
+
+            List<EnumVariantInfo> variants = findEnumVariantsInText(text, enumName);
+            if (!variants.isEmpty()) {
+                List<String> names = new ArrayList<>(variants.size());
+                for (EnumVariantInfo variant : variants) {
+                    names.add(variant.name);
+                }
+                return names;
+            }
+        }
+        return List.of();
+    }
+
+    public StructTarget enumVariantTargetForEnumAndVariant(String enumName, String variantName) {
+        if (enumName == null || enumName.isBlank() || variantName == null || variantName.isBlank()) {
+            return null;
+        }
+
+        List<VirtualFile> candidateFiles = findCandidateFiles(enumName);
+        if (candidateFiles.isEmpty()) {
+            return null;
+        }
+
+        for (VirtualFile file : candidateFiles) {
+            String text = loadText(file);
+            if (text == null || text.isBlank() || !text.contains(enumName) || !text.contains(variantName)) {
+                continue;
+            }
+
+            List<EnumVariantInfo> variants = findEnumVariantsInText(text, enumName);
+            for (EnumVariantInfo variant : variants) {
+                if (variant.name.equals(variantName)) {
+                    return new StructTarget(file, variant.offset);
+                }
+            }
+        }
+        return null;
+    }
+
+    public String enumVariantDocForEnumAndVariant(String enumName, String variantName) {
+        if (enumName == null || enumName.isBlank() || variantName == null || variantName.isBlank()) {
+            return null;
+        }
+
+        List<VirtualFile> candidateFiles = findCandidateFiles(enumName);
+        if (candidateFiles.isEmpty()) {
+            return null;
+        }
+
+        for (VirtualFile file : candidateFiles) {
+            String text = loadText(file);
+            if (text == null || text.isBlank() || !text.contains(enumName) || !text.contains(variantName)) {
+                continue;
+            }
+
+            List<EnumVariantInfo> variants = findEnumVariantsInText(text, enumName);
+            for (EnumVariantInfo variant : variants) {
+                if (!variant.name.equals(variantName)) {
+                    continue;
+                }
+                if (variant.doc != null && !variant.doc.isBlank()) {
+                    return variant.doc;
+                }
+                return null;
+            }
+        }
+        return null;
+    }
+
     public String resolveStructNameForObject(String objectName, String preferredStructName, boolean allowDeepPreferredLookup) {
         if (preferredStructName != null && !preferredStructName.isBlank()) {
-            if (resolveStructInfo(preferredStructName, allowDeepPreferredLookup) != null) {
+            if (isResolvableTypeName(preferredStructName, allowDeepPreferredLookup)) {
                 return preferredStructName;
             }
         }
@@ -272,11 +445,21 @@ public final class RustBeuIndex {
         }
 
         for (String typeName : exposedTypes) {
-            if (resolveStructInfo(typeName, allowDeepPreferredLookup) != null) {
+            if (isResolvableTypeName(typeName, allowDeepPreferredLookup)) {
                 return typeName;
             }
         }
         return null;
+    }
+
+    private boolean isResolvableTypeName(String typeName, boolean allowDeepPreferredLookup) {
+        if (typeName == null || typeName.isBlank()) {
+            return false;
+        }
+        if (resolveStructInfo(typeName, allowDeepPreferredLookup) != null) {
+            return true;
+        }
+        return typeTargetForName(typeName) != null;
     }
 
     public List<String> componentTags() {
@@ -293,6 +476,76 @@ public final class RustBeuIndex {
         }
         List<HtmlFunctionTarget> targets = snapshot.htmlFunctions.get(functionName.toLowerCase(Locale.ROOT));
         return targets == null ? List.of() : targets;
+    }
+
+    public StructTarget typeTargetForName(String typeName) {
+        if (typeName == null || typeName.isBlank()) {
+            return null;
+        }
+
+        List<VirtualFile> candidateFiles = findCandidateFiles(typeName);
+        if (candidateFiles.isEmpty()) {
+            return null;
+        }
+
+        for (VirtualFile file : candidateFiles) {
+            String text = loadText(file);
+            if (text == null || text.isEmpty() || !text.contains(typeName)) {
+                continue;
+            }
+            int offset = findTypeNameOffsetInText(text, typeName);
+            if (offset >= 0) {
+                return new StructTarget(file, offset);
+            }
+        }
+        return null;
+    }
+
+    public StructTarget structTargetForStructName(String structName) {
+        if (structName == null || structName.isBlank()) {
+            return null;
+        }
+
+        List<VirtualFile> candidateFiles = findCandidateFiles(structName);
+        if (candidateFiles.isEmpty()) {
+            return null;
+        }
+
+        for (VirtualFile file : candidateFiles) {
+            String text = loadText(file);
+            if (text == null || text.isEmpty() || !text.contains("struct") || !text.contains(structName)) {
+                continue;
+            }
+            int offset = findStructNameOffsetInText(text, structName);
+            if (offset >= 0) {
+                return new StructTarget(file, offset);
+            }
+        }
+        return null;
+    }
+
+    public StructTarget fieldTargetForStructAndField(String structName, String fieldName) {
+        if (structName == null || structName.isBlank() || fieldName == null || fieldName.isBlank()) {
+            return null;
+        }
+
+        List<VirtualFile> candidateFiles = findCandidateFiles(structName);
+        if (candidateFiles.isEmpty()) {
+            return null;
+        }
+
+        for (VirtualFile file : candidateFiles) {
+            String text = loadText(file);
+            if (text == null || text.isEmpty() || !text.contains(structName) || !text.contains(fieldName)) {
+                continue;
+            }
+
+            int offset = findFieldOffsetInText(text, structName, fieldName);
+            if (offset >= 0) {
+                return new StructTarget(file, offset);
+            }
+        }
+        return null;
     }
 
     private StructInfo resolveStructInfo(String structName, boolean allowDeepSearch) {
@@ -415,6 +668,8 @@ public final class RustBeuIndex {
         StructInfo structInfo = null;
         Set<String> methodNames = new LinkedHashSet<>();
         Map<String, String> methodDocs = new LinkedHashMap<>();
+        Map<String, String> methodParameters = new LinkedHashMap<>();
+        Map<String, String> methodReturnTypes = new LinkedHashMap<>();
         for (VirtualFile file : candidateFiles) {
             String text = loadText(file);
             if (text == null || text.isEmpty() || !text.contains(structName)) {
@@ -425,16 +680,25 @@ public final class RustBeuIndex {
                 structInfo = findStructInText(text, structName);
             }
             if (text.contains("impl") && text.contains("fn")) {
-                collectPublicMethodsFromImpls(text, structName, methodNames, methodDocs);
+                collectPublicMethodsFromImpls(text, structName, methodNames, methodDocs, methodParameters, methodReturnTypes);
             }
         }
         if (structInfo == null) {
             if (methodNames.isEmpty()) {
                 return null;
             }
-            return new StructInfo(null, List.of(), Map.of(), Map.of(), List.copyOf(methodNames), Map.copyOf(methodDocs));
+            return new StructInfo(
+                    null,
+                    List.of(),
+                    Map.of(),
+                    Map.of(),
+                    List.copyOf(methodNames),
+                    Map.copyOf(methodDocs),
+                    Map.copyOf(methodParameters),
+                    Map.copyOf(methodReturnTypes)
+            );
         }
-        return withMethods(structInfo, methodNames, methodDocs);
+        return withMethods(structInfo, methodNames, methodDocs, methodParameters, methodReturnTypes);
     }
 
     private List<VirtualFile> findCandidateFiles(String structName) {
@@ -482,6 +746,288 @@ public final class RustBeuIndex {
         return null;
     }
 
+    private static int findStructNameOffsetInText(String text, String structName) {
+        Matcher structMatcher = STRUCT_PATTERN.matcher(text);
+        while (structMatcher.find()) {
+            String matchedStructName = structMatcher.group("name");
+            if (matchedStructName == null || !matchedStructName.equals(structName)) {
+                continue;
+            }
+            return structMatcher.start("name");
+        }
+        return -1;
+    }
+
+    private static int findTypeNameOffsetInText(String text, String typeName) {
+        int structOffset = findStructNameOffsetInText(text, typeName);
+        if (structOffset >= 0) {
+            return structOffset;
+        }
+
+        Matcher enumMatcher = ENUM_PATTERN.matcher(text);
+        while (enumMatcher.find()) {
+            String matchedEnumName = enumMatcher.group("name");
+            if (matchedEnumName == null || !matchedEnumName.equals(typeName)) {
+                continue;
+            }
+            return enumMatcher.start("name");
+        }
+
+        Matcher aliasMatcher = TYPE_ALIAS_PATTERN.matcher(text);
+        while (aliasMatcher.find()) {
+            String matchedAliasName = aliasMatcher.group("name");
+            if (matchedAliasName == null || !matchedAliasName.equals(typeName)) {
+                continue;
+            }
+            return aliasMatcher.start("name");
+        }
+
+        return -1;
+    }
+
+    private static String findTypeDocInText(String text, String typeName) {
+        Matcher structMatcher = STRUCT_PATTERN.matcher(text);
+        while (structMatcher.find()) {
+            String matchedName = structMatcher.group("name");
+            if (matchedName == null || !matchedName.equals(typeName)) {
+                continue;
+            }
+            return normalizeRustDoc(structMatcher.group("docs"));
+        }
+
+        Matcher enumMatcher = ENUM_PATTERN.matcher(text);
+        while (enumMatcher.find()) {
+            String matchedName = enumMatcher.group("name");
+            if (matchedName == null || !matchedName.equals(typeName)) {
+                continue;
+            }
+            return normalizeRustDoc(enumMatcher.group("docs"));
+        }
+
+        Matcher aliasMatcher = TYPE_ALIAS_PATTERN.matcher(text);
+        while (aliasMatcher.find()) {
+            String matchedName = aliasMatcher.group("name");
+            if (matchedName == null || !matchedName.equals(typeName)) {
+                continue;
+            }
+            return normalizeRustDoc(aliasMatcher.group("docs"));
+        }
+
+        return null;
+    }
+
+    private static List<EnumVariantInfo> findEnumVariantsInText(String text, String enumName) {
+        Matcher enumMatcher = ENUM_WITH_BODY_PATTERN.matcher(text);
+        while (enumMatcher.find()) {
+            String matchedEnumName = enumMatcher.group("name");
+            if (matchedEnumName == null || !matchedEnumName.equals(enumName)) {
+                continue;
+            }
+
+            String body = enumMatcher.group("body");
+            if (body == null || body.isBlank()) {
+                return List.of();
+            }
+            int bodyStart = enumMatcher.start("body");
+            return parseEnumVariants(body, bodyStart);
+        }
+        return List.of();
+    }
+
+    private static List<EnumVariantInfo> parseEnumVariants(String body, int bodyStartOffset) {
+        List<EnumVariantInfo> variants = new ArrayList<>();
+        int segmentStart = 0;
+        int angleDepth = 0;
+        int parenDepth = 0;
+        int squareDepth = 0;
+        int braceDepth = 0;
+        boolean inString = false;
+        boolean inChar = false;
+        boolean escaping = false;
+
+        for (int index = 0; index < body.length(); index++) {
+            char ch = body.charAt(index);
+
+            if (inString) {
+                if (escaping) {
+                    escaping = false;
+                } else if (ch == '\\') {
+                    escaping = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (inChar) {
+                if (escaping) {
+                    escaping = false;
+                } else if (ch == '\\') {
+                    escaping = true;
+                } else if (ch == '\'') {
+                    inChar = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+            if (ch == '\'') {
+                inChar = true;
+                continue;
+            }
+
+            if (ch == '<') {
+                angleDepth++;
+                continue;
+            }
+            if (ch == '>') {
+                if (angleDepth > 0) {
+                    angleDepth--;
+                }
+                continue;
+            }
+            if (ch == '(') {
+                parenDepth++;
+                continue;
+            }
+            if (ch == ')') {
+                if (parenDepth > 0) {
+                    parenDepth--;
+                }
+                continue;
+            }
+            if (ch == '[') {
+                squareDepth++;
+                continue;
+            }
+            if (ch == ']') {
+                if (squareDepth > 0) {
+                    squareDepth--;
+                }
+                continue;
+            }
+            if (ch == '{') {
+                braceDepth++;
+                continue;
+            }
+            if (ch == '}') {
+                if (braceDepth > 0) {
+                    braceDepth--;
+                }
+                continue;
+            }
+
+            if (ch == ',' && angleDepth == 0 && parenDepth == 0 && squareDepth == 0 && braceDepth == 0) {
+                EnumVariantInfo info = extractEnumVariantInfo(body, bodyStartOffset, segmentStart, index);
+                if (info != null) {
+                    variants.add(info);
+                }
+                segmentStart = index + 1;
+            }
+        }
+
+        EnumVariantInfo tail = extractEnumVariantInfo(body, bodyStartOffset, segmentStart, body.length());
+        if (tail != null) {
+            variants.add(tail);
+        }
+        return variants;
+    }
+
+    private static EnumVariantInfo extractEnumVariantInfo(String body, int bodyStartOffset, int segmentStart, int segmentEnd) {
+        int index = segmentStart;
+        StringBuilder docs = new StringBuilder();
+        while (index < segmentEnd) {
+            char ch = body.charAt(index);
+            if (Character.isWhitespace(ch)) {
+                index++;
+                continue;
+            }
+            if (index + 2 < segmentEnd && body.charAt(index) == '/' && body.charAt(index + 1) == '/' && body.charAt(index + 2) == '/') {
+                int lineEnd = skipToLineEnd(body, index);
+                if (docs.length() > 0) {
+                    docs.append('\n');
+                }
+                docs.append(body, index, Math.min(lineEnd, body.length()));
+                index = skipToLineEnd(body, index);
+                continue;
+            }
+            if (index + 1 < segmentEnd && body.charAt(index) == '#' && body.charAt(index + 1) == '[') {
+                index = skipAttribute(body, index, segmentEnd);
+                continue;
+            }
+            break;
+        }
+
+        if (index >= segmentEnd || !isIdentifierStartChar(body.charAt(index))) {
+            return null;
+        }
+
+        int nameStart = index;
+        index++;
+        while (index < segmentEnd && isIdentifierChar(body.charAt(index))) {
+            index++;
+        }
+        String name = body.substring(nameStart, index);
+        String variantDoc = docs.isEmpty() ? null : normalizeRustDoc(docs.toString());
+        return new EnumVariantInfo(name, bodyStartOffset + nameStart, variantDoc);
+    }
+
+    private static int skipToLineEnd(String text, int start) {
+        int index = start;
+        while (index < text.length() && text.charAt(index) != '\n') {
+            index++;
+        }
+        return index;
+    }
+
+    private static int skipAttribute(String text, int start, int endExclusive) {
+        int index = start + 2;
+        int depth = 1;
+        while (index < endExclusive) {
+            char ch = text.charAt(index);
+            if (ch == '[') {
+                depth++;
+            } else if (ch == ']') {
+                depth--;
+                if (depth == 0) {
+                    return index + 1;
+                }
+            }
+            index++;
+        }
+        return endExclusive;
+    }
+
+    private static int findFieldOffsetInText(String text, String structName, String fieldName) {
+        Matcher structMatcher = STRUCT_PATTERN.matcher(text);
+        while (structMatcher.find()) {
+            String matchedStructName = structMatcher.group("name");
+            if (matchedStructName == null || !matchedStructName.equals(structName)) {
+                continue;
+            }
+
+            String body = structMatcher.group("body");
+            if (body == null || body.isBlank()) {
+                return -1;
+            }
+
+            int bodyStart = structMatcher.start("body");
+            Matcher fieldMatcher = FIELD_PATTERN.matcher(body);
+            while (fieldMatcher.find()) {
+                String matchedFieldName = fieldMatcher.group("name");
+                if (matchedFieldName == null || !matchedFieldName.equals(fieldName)) {
+                    continue;
+                }
+                return bodyStart + fieldMatcher.start("name");
+            }
+            return -1;
+        }
+        return -1;
+    }
+
     private static StructInfo buildStructInfo(String docs, String body) {
         String structDoc = normalizeRustDoc(docs);
         Set<String> fields = new LinkedHashSet<>();
@@ -515,6 +1061,8 @@ public final class RustBeuIndex {
                 Map.copyOf(fieldDocs),
                 Map.copyOf(fieldTypes),
                 List.of(),
+                Map.of(),
+                Map.of(),
                 Map.of()
         );
     }
@@ -606,17 +1154,31 @@ public final class RustBeuIndex {
 
         Set<String> methods = new LinkedHashSet<>(info.methods);
         Map<String, String> methodDocs = new LinkedHashMap<>(info.methodDocs);
-        collectPublicMethodsFromImpls(text, structName, methods, methodDocs);
+        Map<String, String> methodParameters = new LinkedHashMap<>(info.methodParameters);
+        Map<String, String> methodReturnTypes = new LinkedHashMap<>(info.methodReturnTypes);
+        collectPublicMethodsFromImpls(text, structName, methods, methodDocs, methodParameters, methodReturnTypes);
 
-        return withMethods(info, methods, methodDocs);
+        return withMethods(info, methods, methodDocs, methodParameters, methodReturnTypes);
     }
 
-    private static StructInfo withMethods(StructInfo base, Set<String> additionalMethods, Map<String, String> additionalMethodDocs) {
+    private static StructInfo withMethods(
+            StructInfo base,
+            Set<String> additionalMethods,
+            Map<String, String> additionalMethodDocs,
+            Map<String, String> additionalMethodParameters,
+            Map<String, String> additionalMethodReturnTypes
+    ) {
         Set<String> allMethods = new LinkedHashSet<>(base.methods);
         allMethods.addAll(additionalMethods);
 
         Map<String, String> allMethodDocs = new LinkedHashMap<>(base.methodDocs);
         allMethodDocs.putAll(additionalMethodDocs);
+
+        Map<String, String> allMethodParameters = new LinkedHashMap<>(base.methodParameters);
+        allMethodParameters.putAll(additionalMethodParameters);
+
+        Map<String, String> allMethodReturnTypes = new LinkedHashMap<>(base.methodReturnTypes);
+        allMethodReturnTypes.putAll(additionalMethodReturnTypes);
 
         return new StructInfo(
                 base.doc,
@@ -624,7 +1186,9 @@ public final class RustBeuIndex {
                 base.fieldDocs,
                 base.fieldTypes,
                 List.copyOf(allMethods),
-                Map.copyOf(allMethodDocs)
+                Map.copyOf(allMethodDocs),
+                Map.copyOf(allMethodParameters),
+                Map.copyOf(allMethodReturnTypes)
         );
     }
 
@@ -748,7 +1312,9 @@ public final class RustBeuIndex {
             String text,
             String structName,
             Set<String> methodNames,
-            Map<String, String> methodDocs
+            Map<String, String> methodDocs,
+            Map<String, String> methodParameters,
+            Map<String, String> methodReturnTypes
     ) {
         int searchOffset = 0;
         while (searchOffset < text.length()) {
@@ -781,10 +1347,26 @@ public final class RustBeuIndex {
                         continue;
                     }
                     methodNames.add(methodName);
+                    String normalizedMethodName = methodName.toLowerCase(Locale.ROOT);
 
                     String methodDoc = normalizeRustDoc(methodMatcher.group("docs"));
                     if (methodDoc != null && !methodDoc.isBlank()) {
-                        methodDocs.put(methodName.toLowerCase(Locale.ROOT), methodDoc);
+                        methodDocs.put(normalizedMethodName, methodDoc);
+                    }
+
+                    int openParenOffset = methodMatcher.end() - 1;
+                    int closeParenOffset = findMatchingParen(body, openParenOffset);
+                    if (closeParenOffset > openParenOffset) {
+                        String rawParams = body.substring(openParenOffset + 1, closeParenOffset);
+                        String normalizedParams = normalizeMethodParameters(rawParams);
+                        if (normalizedParams != null) {
+                            methodParameters.put(normalizedMethodName, normalizedParams);
+                        }
+
+                        String returnType = extractMethodReturnType(body, closeParenOffset + 1);
+                        if (returnType != null && !returnType.isBlank()) {
+                            methodReturnTypes.put(normalizedMethodName, returnType);
+                        }
                     }
                 }
             }
@@ -824,11 +1406,315 @@ public final class RustBeuIndex {
         return -1;
     }
 
+    private static int findMatchingParen(String text, int openParenIndex) {
+        if (openParenIndex < 0 || openParenIndex >= text.length() || text.charAt(openParenIndex) != '(') {
+            return -1;
+        }
+
+        int depth = 0;
+        boolean inString = false;
+        boolean inChar = false;
+        boolean escaping = false;
+        for (int i = openParenIndex; i < text.length(); i++) {
+            char ch = text.charAt(i);
+
+            if (inString) {
+                if (escaping) {
+                    escaping = false;
+                } else if (ch == '\\') {
+                    escaping = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (inChar) {
+                if (escaping) {
+                    escaping = false;
+                } else if (ch == '\\') {
+                    escaping = true;
+                } else if (ch == '\'') {
+                    inChar = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+            if (ch == '\'') {
+                inChar = true;
+                continue;
+            }
+
+            if (ch == '(') {
+                depth++;
+            } else if (ch == ')') {
+                depth--;
+                if (depth == 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static String normalizeMethodParameters(String rawParameters) {
+        if (rawParameters == null) {
+            return null;
+        }
+        String normalized = rawParameters.trim().replaceAll("\\s+", " ");
+        if (normalized.isEmpty()) {
+            return "";
+        }
+        return normalized;
+    }
+
+    private static String extractMethodReturnType(String text, int afterParamsOffset) {
+        if (text == null || text.isEmpty() || afterParamsOffset < 0 || afterParamsOffset >= text.length()) {
+            return null;
+        }
+
+        int signatureEnd = findMethodSignatureEnd(text, afterParamsOffset);
+        if (signatureEnd <= afterParamsOffset) {
+            return null;
+        }
+        String signatureTail = text.substring(afterParamsOffset, signatureEnd);
+        int arrowOffset = signatureTail.indexOf("->");
+        if (arrowOffset < 0) {
+            return null;
+        }
+
+        String returnPart = signatureTail.substring(arrowOffset + 2).trim();
+        if (returnPart.isEmpty()) {
+            return null;
+        }
+
+        int whereOffset = findKeywordAtTopLevel(returnPart, "where");
+        if (whereOffset >= 0) {
+            returnPart = returnPart.substring(0, whereOffset);
+        }
+
+        return normalizeFieldType(returnPart);
+    }
+
+    private static int findMethodSignatureEnd(String text, int startOffset) {
+        int angleDepth = 0;
+        int parenDepth = 0;
+        int squareDepth = 0;
+        int braceDepth = 0;
+        boolean inString = false;
+        boolean inChar = false;
+        boolean escaping = false;
+
+        for (int index = Math.max(0, startOffset); index < text.length(); index++) {
+            char ch = text.charAt(index);
+
+            if (inString) {
+                if (escaping) {
+                    escaping = false;
+                } else if (ch == '\\') {
+                    escaping = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (inChar) {
+                if (escaping) {
+                    escaping = false;
+                } else if (ch == '\\') {
+                    escaping = true;
+                } else if (ch == '\'') {
+                    inChar = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+            if (ch == '\'') {
+                inChar = true;
+                continue;
+            }
+
+            if (ch == '<') {
+                angleDepth++;
+                continue;
+            }
+            if (ch == '>') {
+                if (angleDepth > 0) {
+                    angleDepth--;
+                }
+                continue;
+            }
+            if (ch == '(') {
+                parenDepth++;
+                continue;
+            }
+            if (ch == ')') {
+                if (parenDepth > 0) {
+                    parenDepth--;
+                }
+                continue;
+            }
+            if (ch == '[') {
+                squareDepth++;
+                continue;
+            }
+            if (ch == ']') {
+                if (squareDepth > 0) {
+                    squareDepth--;
+                }
+                continue;
+            }
+            if (ch == '{' && angleDepth == 0 && parenDepth == 0 && squareDepth == 0 && braceDepth == 0) {
+                return index;
+            }
+            if (ch == ';' && angleDepth == 0 && parenDepth == 0 && squareDepth == 0 && braceDepth == 0) {
+                return index;
+            }
+            if (ch == '{') {
+                braceDepth++;
+                continue;
+            }
+            if (ch == '}') {
+                if (braceDepth > 0) {
+                    braceDepth--;
+                }
+            }
+        }
+        return text.length();
+    }
+
+    private static int findKeywordAtTopLevel(String text, String keyword) {
+        if (text == null || text.isEmpty() || keyword == null || keyword.isBlank()) {
+            return -1;
+        }
+
+        int angleDepth = 0;
+        int parenDepth = 0;
+        int squareDepth = 0;
+        int braceDepth = 0;
+        boolean inString = false;
+        boolean inChar = false;
+        boolean escaping = false;
+
+        for (int index = 0; index < text.length(); index++) {
+            char ch = text.charAt(index);
+
+            if (inString) {
+                if (escaping) {
+                    escaping = false;
+                } else if (ch == '\\') {
+                    escaping = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (inChar) {
+                if (escaping) {
+                    escaping = false;
+                } else if (ch == '\\') {
+                    escaping = true;
+                } else if (ch == '\'') {
+                    inChar = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+            if (ch == '\'') {
+                inChar = true;
+                continue;
+            }
+
+            if (ch == '<') {
+                angleDepth++;
+                continue;
+            }
+            if (ch == '>') {
+                if (angleDepth > 0) {
+                    angleDepth--;
+                }
+                continue;
+            }
+            if (ch == '(') {
+                parenDepth++;
+                continue;
+            }
+            if (ch == ')') {
+                if (parenDepth > 0) {
+                    parenDepth--;
+                }
+                continue;
+            }
+            if (ch == '[') {
+                squareDepth++;
+                continue;
+            }
+            if (ch == ']') {
+                if (squareDepth > 0) {
+                    squareDepth--;
+                }
+                continue;
+            }
+            if (ch == '{') {
+                braceDepth++;
+                continue;
+            }
+            if (ch == '}') {
+                if (braceDepth > 0) {
+                    braceDepth--;
+                }
+                continue;
+            }
+
+            if (angleDepth != 0 || parenDepth != 0 || squareDepth != 0 || braceDepth != 0) {
+                continue;
+            }
+            if (!startsWithKeyword(text, index, keyword)) {
+                continue;
+            }
+            return index;
+        }
+        return -1;
+    }
+
+    private static boolean startsWithKeyword(String text, int offset, String keyword) {
+        int keywordLength = keyword.length();
+        if (offset < 0 || offset + keywordLength > text.length()) {
+            return false;
+        }
+        if (!text.regionMatches(offset, keyword, 0, keywordLength)) {
+            return false;
+        }
+        if (offset > 0 && isIdentifierChar(text.charAt(offset - 1))) {
+            return false;
+        }
+        int end = offset + keywordLength;
+        return end >= text.length() || !isIdentifierChar(text.charAt(end));
+    }
+
     private static boolean isIdentifierBoundary(String text, int start, int end) {
         if (start > 0 && isIdentifierChar(text.charAt(start - 1))) {
             return false;
         }
         return end >= text.length() || !isIdentifierChar(text.charAt(end));
+    }
+
+    private static boolean isIdentifierStartChar(char ch) {
+        return ch == '_' || Character.isLetter(ch);
     }
 
     private static boolean isIdentifierChar(char ch) {

@@ -10,18 +10,18 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-final class BeuHtmlUseResolver {
+public final class BeuHtmlUseResolver {
     private static final Pattern USE_PATTERN = Pattern.compile(
             "@use\\s+\"([^\"]+)\"\\s+as\\s+([A-Za-z_][\\w]*)\\s*;?"
     );
 
     @Nullable
-    static String resolveStructName(@NotNull PsiFile htmlFile, @NotNull String objectName) {
+    public static String resolveStructName(@NotNull PsiFile htmlFile, @NotNull String objectName) {
         return resolveStructName(htmlFile.getText(), objectName);
     }
 
     @Nullable
-    static String resolveStructName(@Nullable String htmlText, @NotNull String objectName) {
+    public static String resolveStructName(@Nullable String htmlText, @NotNull String objectName) {
         if (objectName.isBlank()) {
             return null;
         }
@@ -34,12 +34,12 @@ final class BeuHtmlUseResolver {
     }
 
     @Nullable
-    static String resolveStructNameFromUse(@NotNull PsiFile htmlFile, @NotNull String objectName) {
+    public static String resolveStructNameFromUse(@NotNull PsiFile htmlFile, @NotNull String objectName) {
         return resolveStructNameFromUse(htmlFile.getText(), objectName);
     }
 
     @Nullable
-    static String resolveStructNameFromUse(@Nullable String htmlText, @NotNull String objectName) {
+    public static String resolveStructNameFromUse(@Nullable String htmlText, @NotNull String objectName) {
         if (objectName.isBlank()) {
             return null;
         }

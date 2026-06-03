@@ -29,6 +29,16 @@ final class BeuHtmlHighlighting {
             DefaultLanguageHighlighterColors.STRING
     );
 
+    static final TextAttributesKey USE_PUNCTUATION = TextAttributesKey.createTextAttributesKey(
+            "BEU_USE_PUNCTUATION",
+            DefaultLanguageHighlighterColors.SEMICOLON
+    );
+
+    static final TextAttributesKey ENUM_VARIANT = TextAttributesKey.createTextAttributesKey(
+            "BEU_ENUM_VARIANT",
+            DefaultLanguageHighlighterColors.CONSTANT
+    );
+
     private BeuHtmlHighlighting() {
     }
 }
