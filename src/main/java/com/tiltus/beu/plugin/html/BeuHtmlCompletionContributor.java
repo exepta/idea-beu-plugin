@@ -64,10 +64,22 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
             ) {
                 PsiElement position = parameters.getPosition();
                 if (isExpressionTextContext(position)) {
+                    ObjectAccessPrefix objectAccess = objectAccessPrefix(parameters);
+                    if (objectAccess != null) {
+                        addRustStructFieldCompletions(parameters, result, objectAccess);
+                        result.stopHere();
+                        return;
+                    }
+
+                    EnumAccessPrefix enumAccess = enumAccessPrefix(parameters);
+                    if (enumAccess != null) {
+                        addRustEnumMemberCompletions(parameters, result, enumAccess);
+                        result.stopHere();
+                        return;
+                    }
+
                     addUseDirectivePathCompletions(parameters, result);
                     addDirectiveCompletions(result);
-                    addRustStructFieldCompletions(parameters, result);
-                    addRustEnumMemberCompletions(parameters, result);
                 }
 
                 if (isInAttributeNameArea(position)) {
@@ -140,6 +152,14 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
         if (objectAccess == null) {
             return;
         }
+        addRustStructFieldCompletions(parameters, result, objectAccess);
+    }
+
+    private static void addRustStructFieldCompletions(
+            CompletionParameters parameters,
+            CompletionResultSet result,
+            ObjectAccessPrefix objectAccess
+    ) {
 
         String htmlText = parameters.getEditor().getDocument().getText();
         RustStructFieldIndex index = RustStructFieldIndex.get(parameters.getOriginalFile().getProject());
@@ -214,6 +234,14 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
         if (enumAccess == null) {
             return;
         }
+        addRustEnumMemberCompletions(parameters, result, enumAccess);
+    }
+
+    private static void addRustEnumMemberCompletions(
+            CompletionParameters parameters,
+            CompletionResultSet result,
+            EnumAccessPrefix enumAccess
+    ) {
 
         RustStructFieldIndex index = RustStructFieldIndex.get(parameters.getOriginalFile().getProject());
         CompletionResultSet prefixedResult = result.withPrefixMatcher(enumAccess.memberPrefix);

@@ -18,7 +18,7 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <annotator language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlAnnotator"/>
-        <completion.contributor language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlCompletionContributor"/>
+        <completion.contributor language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlCompletionContributor" order="first"/>
         <lang.documentationProvider language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlDocumentationProvider"/>
         <postFormatProcessor implementationClass="com.tiltus.beu.plugin.format.BeuDirectivePostFormatProcessor" order="last"/>
         <typedHandler implementationClass="com.tiltus.beu.plugin.format.BeuDirectiveTypedHandler"/>
