@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Compute Next Version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_tag="$(git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+
+          if [[ -z "${latest_tag}" ]]; then
+            next_version="1.0.0"
+          else
+            current="${latest_tag#v}"
+            IFS='.' read -r major minor patch <<< "${current}"
+            next_version="${major}.${minor}.$((patch + 1))"
+          fi
+
+          echo "version=${next_version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${next_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build Plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon clean buildPlugin -PpluginVersion="${{ steps.version.outputs.version }}"
+
+      - name: Resolve Artifact
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="$(ls -1 build/distributions/*.zip | head -n1 || true)"
+          if [[ -z "${artifact}" ]]; then
+            echo "No plugin zip found in build/distributions" >&2
+            exit 1
+          fi
+          echo "path=${artifact}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.version.outputs.tag }}" "${{ steps.artifact.outputs.path }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes "Automated release from main (${GITHUB_SHA})."

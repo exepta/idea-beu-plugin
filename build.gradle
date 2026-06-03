@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.tiltus.beu.parser'
-version = '1.0.16'
+version = findProperty('pluginVersion') ?: '1.0.0'
 
 java {
     toolchain {
