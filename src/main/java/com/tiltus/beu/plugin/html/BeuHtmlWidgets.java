@@ -47,7 +47,9 @@ final class BeuHtmlWidgets {
                 attr("disabled", "Boolean disabled state."),
                 attr("hidden", "Boolean hidden state.")
         );
-        register("select");
+        register("select",
+                attr("value", "Option value submitted by the select.")
+        );
         register("option",
                 attr("value", "Option value submitted by the select."),
                 attr("selected", "Marks this option as selected.")
@@ -142,6 +144,7 @@ final class BeuHtmlWidgets {
         );
         register("label", attr("for", "Target input id."));
         register("icon", attr("src", "Icon source path."));
+        register("listbox");
     }
 
     private static void register(String tag, AttributeDefinition... attributes) {

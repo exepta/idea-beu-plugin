@@ -12,6 +12,7 @@ import com.intellij.psi.xml.XmlAttribute;
 import com.intellij.psi.xml.XmlAttributeValue;
 import com.intellij.psi.xml.XmlText;
 import com.intellij.util.ProcessingContext;
+import com.tiltus.beu.plugin.html.BeuHtmlEvents;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -93,8 +94,12 @@ public final class BeuHtmlStructReferenceContributor extends PsiReferenceContrib
                 if (!isHtmlFile(element)) {
                     return PsiReference.EMPTY_ARRAY;
                 }
-                if (PsiTreeUtil.getParentOfType(element, XmlAttributeValue.class, false) != null) {
-                    return PsiReference.EMPTY_ARRAY;
+
+                XmlAttributeValue attributeValue = element instanceof XmlAttributeValue
+                        ? (XmlAttributeValue) element
+                        : PsiTreeUtil.getParentOfType(element, XmlAttributeValue.class, false);
+                if (attributeValue != null) {
+                    return referencesFromAttributeValue(element, attributeValue);
                 }
                 if (PsiTreeUtil.getParentOfType(element, XmlAttribute.class, false) != null) {
                     return PsiReference.EMPTY_ARRAY;
@@ -114,9 +119,11 @@ public final class BeuHtmlStructReferenceContributor extends PsiReferenceContrib
 
                 int windowStartInText;
                 int windowEndInText;
+                int relativeShift;
                 if (element == xmlText) {
                     windowStartInText = 0;
                     windowEndInText = text.length();
+                    relativeShift = 0;
                 } else {
                     if (element.getTextRange() == null || xmlText.getTextRange() == null) {
                         return PsiReference.EMPTY_ARRAY;
@@ -126,6 +133,7 @@ public final class BeuHtmlStructReferenceContributor extends PsiReferenceContrib
                     if (windowStartInText < 0 || windowEndInText > text.length() || windowStartInText >= windowEndInText) {
                         return PsiReference.EMPTY_ARRAY;
                     }
+                    relativeShift = -windowStartInText;
                 }
 
                 List<ReferenceCandidate> candidates = new ArrayList<>();
@@ -133,25 +141,86 @@ public final class BeuHtmlStructReferenceContributor extends PsiReferenceContrib
                 collectObjectAndMemberReferences(text, candidates);
                 collectTypePathReferences(text, candidates);
                 collectStandaloneObjectReferences(text, candidates);
-
-                List<PsiReference> references = new ArrayList<>();
-                for (ReferenceCandidate candidate : candidates) {
-                    if (candidate.start < windowStartInText || candidate.end > windowEndInText) {
-                        continue;
-                    }
-                    int relativeStart = candidate.start - windowStartInText;
-                    int relativeEnd = candidate.end - windowStartInText;
-                    if (relativeStart < 0 || relativeEnd <= relativeStart || relativeEnd > element.getTextLength()) {
-                        continue;
-                    }
-                    TextRange rangeInElement = TextRange.create(relativeStart, relativeEnd);
-                    references.add(buildReference(element, rangeInElement, candidate));
-                }
-                return references.toArray(PsiReference.EMPTY_ARRAY);
+                return buildReferences(element, candidates, windowStartInText, windowEndInText, relativeShift);
             }
         };
 
         registrar.registerReferenceProvider(PlatformPatterns.psiElement(), provider);
+    }
+
+    private static PsiReference @NotNull [] referencesFromAttributeValue(PsiElement element, XmlAttributeValue attributeValue) {
+        String text = attributeValue.getValue();
+        if (text == null || text.isBlank()) {
+            return PsiReference.EMPTY_ARRAY;
+        }
+        if (!shouldResolveInsideAttributeValue(attributeValue, text)) {
+            return PsiReference.EMPTY_ARRAY;
+        }
+        if (attributeValue.getTextRange() == null) {
+            return PsiReference.EMPTY_ARRAY;
+        }
+
+        TextRange valueRange = attributeValue.getValueTextRange();
+        int windowStartInText;
+        int windowEndInText;
+        int relativeShift;
+        if (element == attributeValue) {
+            windowStartInText = 0;
+            windowEndInText = text.length();
+            relativeShift = valueRange.getStartOffset() - attributeValue.getTextRange().getStartOffset();
+        } else {
+            if (element.getTextRange() == null) {
+                return PsiReference.EMPTY_ARRAY;
+            }
+            windowStartInText = element.getTextRange().getStartOffset() - valueRange.getStartOffset();
+            windowEndInText = windowStartInText + element.getTextLength();
+            if (windowStartInText < 0 || windowEndInText > text.length() || windowStartInText >= windowEndInText) {
+                return PsiReference.EMPTY_ARRAY;
+            }
+            relativeShift = -windowStartInText;
+        }
+
+        List<ReferenceCandidate> candidates = new ArrayList<>();
+        collectObjectAndMemberReferences(text, candidates);
+        collectTypePathReferences(text, candidates);
+        collectStandaloneObjectReferences(text, candidates);
+        return buildReferences(element, candidates, windowStartInText, windowEndInText, relativeShift);
+    }
+
+    private static boolean shouldResolveInsideAttributeValue(XmlAttributeValue attributeValue, String text) {
+        XmlAttribute attribute = attributeValue.getParent() instanceof XmlAttribute xmlAttribute ? xmlAttribute : null;
+        String attributeName = attribute == null ? null : attribute.getName();
+        String lower = text.toLowerCase(Locale.ROOT);
+        if (lower.contains("{{") || lower.contains("$set(") || lower.contains("$event.")) {
+            return true;
+        }
+        if (attributeName != null && BeuHtmlEvents.isFunctionHandlerAttribute(attributeName)) {
+            return lower.contains("::") || lower.contains(".");
+        }
+        return false;
+    }
+
+    private static PsiReference @NotNull [] buildReferences(
+            PsiElement element,
+            List<ReferenceCandidate> candidates,
+            int windowStartInText,
+            int windowEndInText,
+            int relativeShift
+    ) {
+        List<PsiReference> references = new ArrayList<>();
+        for (ReferenceCandidate candidate : candidates) {
+            if (candidate.start < windowStartInText || candidate.end > windowEndInText) {
+                continue;
+            }
+            int relativeStart = candidate.start + relativeShift;
+            int relativeEnd = candidate.end + relativeShift;
+            if (relativeStart < 0 || relativeEnd <= relativeStart || relativeEnd > element.getTextLength()) {
+                continue;
+            }
+            TextRange rangeInElement = TextRange.create(relativeStart, relativeEnd);
+            references.add(buildReference(element, rangeInElement, candidate));
+        }
+        return references.toArray(PsiReference.EMPTY_ARRAY);
     }
 
     private static PsiReference buildReference(PsiElement element, TextRange rangeInElement, ReferenceCandidate candidate) {
@@ -268,9 +337,13 @@ public final class BeuHtmlStructReferenceContributor extends PsiReferenceContrib
             if (objectName == null || objectName.isBlank()) {
                 continue;
             }
+            int objectStart = matcher.start("object");
+            if (objectStart > 0 && text.charAt(objectStart - 1) == '$') {
+                continue;
+            }
 
             references.add(new ReferenceCandidate(
-                    matcher.start("object"),
+                    objectStart,
                     matcher.end("object"),
                     ReferenceKind.STRUCT,
                     objectName,
@@ -353,6 +426,9 @@ public final class BeuHtmlStructReferenceContributor extends PsiReferenceContrib
                 continue;
             }
             if (start > 0 && text.charAt(start - 1) == '@') {
+                continue;
+            }
+            if (start > 0 && text.charAt(start - 1) == '$') {
                 continue;
             }
 

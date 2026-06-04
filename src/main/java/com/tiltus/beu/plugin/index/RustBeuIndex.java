@@ -162,7 +162,7 @@ public final class RustBeuIndex {
     private static final Pattern UI_COMPONENT_STRUCT_PATTERN = Pattern.compile("(?s)#\\[ui_component\\]\\s*(?:pub\\s+)?struct\\s+([A-Za-z_][\\w]*)\\b");
     private static final Pattern TEMPLATE_NAME_PATTERN = Pattern.compile("template_name\\s*:\\s*\"([A-Za-z_][A-Za-z0-9_-]*)\"");
     private static final Pattern HTML_FN_PATTERN = Pattern.compile(
-            "(?ms)#\\[html_fn\\((?<html>[A-Za-z_][\\w]*)\\)\\]\\s*(?:pub\\s+)?(?:async\\s+)?fn\\s+(?<fn>[A-Za-z_][\\w]*)"
+            "(?ms)#\\[html_fn\\((?:\"(?<htmlQuoted>[A-Za-z_][\\w]*)\"|(?<html>[A-Za-z_][\\w]*))\\)\\]\\s*(?:pub\\s+)?(?:async\\s+)?fn\\s+(?<fn>[A-Za-z_][\\w]*)"
     );
     private static final Pattern HTML_EXPOSED_TYPE_PATTERN = Pattern.compile(
             "(?ms)#\\[(?:html_use|html_shared)(?:\\([^\\]]*\\))?\\]\\s*(?:\\s*#\\[[^\\n]*]\\s*\\R)*\\s*(?:pub\\s+)?(?:struct|enum|type)\\s+([A-Za-z_][\\w]*)\\b"
@@ -1108,7 +1108,14 @@ public final class RustBeuIndex {
     private static void collectHtmlFunctions(String text, VirtualFile file, Map<String, List<HtmlFunctionTarget>> targetMap) {
         Matcher htmlFnMatcher = HTML_FN_PATTERN.matcher(text);
         while (htmlFnMatcher.find()) {
-            String htmlName = htmlFnMatcher.group("html").toLowerCase(Locale.ROOT);
+            String rawHtmlName = htmlFnMatcher.group("htmlQuoted");
+            if (rawHtmlName == null || rawHtmlName.isBlank()) {
+                rawHtmlName = htmlFnMatcher.group("html");
+            }
+            if (rawHtmlName == null || rawHtmlName.isBlank()) {
+                continue;
+            }
+            String htmlName = rawHtmlName.toLowerCase(Locale.ROOT);
             int fnNameOffset = htmlFnMatcher.start("fn");
             targetMap.computeIfAbsent(htmlName, ignored -> new ArrayList<>()).add(new HtmlFunctionTarget(file, fnNameOffset));
         }

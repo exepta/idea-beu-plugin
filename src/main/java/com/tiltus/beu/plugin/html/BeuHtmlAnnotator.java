@@ -21,6 +21,8 @@ public final class BeuHtmlAnnotator implements Annotator {
     );
     private static final Pattern OBJECT_ATTRIBUTE_PATTERN = Pattern.compile("\\b([A-Za-z_][\\w]*)\\.([A-Za-z_][\\w]*)\\b");
     private static final Pattern ENUM_VARIANT_PATTERN = Pattern.compile("\\b[A-Z][\\w]*::([A-Z][\\w]*)\\b");
+    private static final Pattern TEMPLATE_HELPER_PATTERN = Pattern.compile("\\$(?:set|event)\\b");
+    private static final Pattern TEMPLATE_CALL_PATTERN = Pattern.compile("\\$[A-Za-z_][\\w]*\\s*\\(([^\\r\\n]*)\\)");
 
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
@@ -107,6 +109,33 @@ public final class BeuHtmlAnnotator implements Annotator {
                     startOffset + enumVariantMatcher.end(1),
                     BeuHtmlHighlighting.ENUM_VARIANT
             );
+        }
+
+        Matcher helperMatcher = TEMPLATE_HELPER_PATTERN.matcher(text);
+        while (helperMatcher.find()) {
+            annotateRange(
+                    holder,
+                    startOffset + helperMatcher.start(),
+                    startOffset + helperMatcher.end(),
+                    BeuHtmlHighlighting.TEMPLATE_FUNCTION
+            );
+        }
+
+        Matcher callMatcher = TEMPLATE_CALL_PATTERN.matcher(text);
+        while (callMatcher.find()) {
+            int callStart = callMatcher.start();
+            int callEnd = callMatcher.end();
+            for (int index = callStart; index < callEnd; index++) {
+                char ch = text.charAt(index);
+                if (ch == '(' || ch == ')') {
+                    annotateRange(
+                            holder,
+                            startOffset + index,
+                            startOffset + index + 1,
+                            BeuHtmlHighlighting.TEMPLATE_PUNCTUATION
+                    );
+                }
+            }
         }
     }
 

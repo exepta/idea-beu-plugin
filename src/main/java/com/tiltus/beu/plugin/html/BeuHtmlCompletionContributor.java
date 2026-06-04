@@ -63,21 +63,22 @@ public final class BeuHtmlCompletionContributor extends CompletionContributor {
                     @NotNull CompletionResultSet result
             ) {
                 PsiElement position = parameters.getPosition();
+
+                ObjectAccessPrefix objectAccess = objectAccessPrefix(parameters);
+                if (objectAccess != null) {
+                    addRustStructFieldCompletions(parameters, result, objectAccess);
+                    result.stopHere();
+                    return;
+                }
+
+                EnumAccessPrefix enumAccess = enumAccessPrefix(parameters);
+                if (enumAccess != null) {
+                    addRustEnumMemberCompletions(parameters, result, enumAccess);
+                    result.stopHere();
+                    return;
+                }
+
                 if (isExpressionTextContext(position)) {
-                    ObjectAccessPrefix objectAccess = objectAccessPrefix(parameters);
-                    if (objectAccess != null) {
-                        addRustStructFieldCompletions(parameters, result, objectAccess);
-                        result.stopHere();
-                        return;
-                    }
-
-                    EnumAccessPrefix enumAccess = enumAccessPrefix(parameters);
-                    if (enumAccess != null) {
-                        addRustEnumMemberCompletions(parameters, result, enumAccess);
-                        result.stopHere();
-                        return;
-                    }
-
                     addUseDirectivePathCompletions(parameters, result);
                     addDirectiveCompletions(result);
                 }

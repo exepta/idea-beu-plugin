@@ -18,6 +18,12 @@ import java.util.Set;
 
 public final class BeuHtmlDocumentationProvider extends AbstractDocumentationProvider {
     private static final Key<Integer> HOVER_OFFSET_KEY = Key.create("beu.hover.offset");
+    private static final String TEMPLATE_SET_DOC = """
+            With this method, you can easily and quickly modify a value and react directly to the event. If you are planning something more substantial, please use the `#[html_fn()]` macro to register your own system within Bevy!
+            """;
+    private static final String TEMPLATE_EVENT_DOC = """
+            This is used to directly access the event within the `$set` method. This is necessary to retrieve the element's value or other values.
+            """;
     private static final Set<String> RESERVED_IDENTIFIERS = Set.of(
             "if", "else", "for", "use", "as", "match", "let", "crate", "self", "super", "true", "false"
     );
@@ -63,6 +69,13 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
         }
         markOffsetOnAncestors(target, file, targetOffset);
 
+        if (PsiTreeUtil.getParentOfType(target, XmlAttributeValue.class, false) != null) {
+            String fileText = file.getText();
+            return (objectAccessContextAt(fileText, targetOffset) != null || templateHelperAt(fileText, targetOffset) != null)
+                    ? target
+                    : null;
+        }
+
         XmlAttribute attribute = findAttribute(target);
         if (attribute != null) {
             XmlTag tag = attribute.getParent();
@@ -71,10 +84,6 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
                     || BeuHtmlWidgets.isSupportedAttribute(attribute.getName(), tagName)) {
                 return target;
             }
-            return null;
-        }
-
-        if (PsiTreeUtil.getParentOfType(target, XmlAttributeValue.class, false) != null) {
             return null;
         }
 
@@ -114,6 +123,21 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
             return null;
         }
 
+        PsiFile file = element.getContainingFile();
+        if (file != null && file.getName().toLowerCase(Locale.ROOT).endsWith(".html")
+                && PsiTreeUtil.getParentOfType(element, XmlAttributeValue.class, false) != null) {
+            Integer markedOffset = element.getUserData(HOVER_OFFSET_KEY);
+            int offset = markedOffset != null ? markedOffset : element.getTextRange().getStartOffset();
+            String text = file.getText();
+            String helper = templateHelperAt(text, offset);
+            if (helper != null) {
+                return "<p><b>beu:</b></p>" + renderMarkdown(templateHelperDoc(helper));
+            }
+            if (objectAccessContextAt(text, offset) != null) {
+                return null;
+            }
+        }
+
         XmlTag tag = attribute.getParent();
         String tagName = tag == null ? null : tag.getName();
 
@@ -141,7 +165,7 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
         if (element == null || element.getTextRange() == null) {
             return null;
         }
-        if (findAttribute(element) != null) {
+        if (findAttribute(element) != null && PsiTreeUtil.getParentOfType(element, XmlAttributeValue.class, false) == null) {
             return null;
         }
 
@@ -160,6 +184,9 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
 
         Integer markedOffset = element.getUserData(HOVER_OFFSET_KEY);
         int offset = markedOffset != null ? markedOffset : element.getTextRange().getStartOffset();
+        if (templateHelperAt(text, offset) != null) {
+            return null;
+        }
         ObjectAccessContext context = objectAccessContextAt(text, offset);
         if (context == null) {
             return null;
@@ -486,6 +513,51 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
 
     private static boolean isIdentifierChar(char ch) {
         return ch == '_' || Character.isLetterOrDigit(ch);
+    }
+
+    private static String templateHelperAt(String text, int rawOffset) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+
+        int offset = Math.min(Math.max(rawOffset, 0), text.length() - 1);
+        if (!isTemplateHelperChar(text.charAt(offset))) {
+            if (offset > 0 && isTemplateHelperChar(text.charAt(offset - 1))) {
+                offset--;
+            } else {
+                return null;
+            }
+        }
+
+        int tokenStart = offset;
+        while (tokenStart > 0 && isTemplateHelperChar(text.charAt(tokenStart - 1))) {
+            tokenStart--;
+        }
+
+        int tokenEnd = offset + 1;
+        while (tokenEnd < text.length() && isTemplateHelperChar(text.charAt(tokenEnd))) {
+            tokenEnd++;
+        }
+
+        String token = text.substring(tokenStart, tokenEnd);
+        return switch (token) {
+            case "$set", "$event" -> token;
+            default -> null;
+        };
+    }
+
+    private static String templateHelperDoc(String helperToken) {
+        if ("$set".equals(helperToken)) {
+            return TEMPLATE_SET_DOC;
+        }
+        if ("$event".equals(helperToken)) {
+            return TEMPLATE_EVENT_DOC;
+        }
+        return "";
+    }
+
+    private static boolean isTemplateHelperChar(char ch) {
+        return ch == '$' || ch == '_' || Character.isLetterOrDigit(ch);
     }
 
     private static void markOffsetOnAncestors(PsiElement leafElement, PsiFile file, int targetOffset) {
