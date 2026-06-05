@@ -40,6 +40,12 @@ final class BeuHtmlWidgets {
                 attr("action", "Submit handler name for the form."),
                 attr("validate", "Validation mode: always, send, or interact.")
         );
+        register("badge",
+                attr("value", "The count to display."),
+                attr("count", "The count to display."),
+                attr("max", "Max count which can be displayed."),
+                attr("anchor", "The anchor in which Conor is displayed.")
+        );
         register("button", attr("type", "Button type: button, submit, or reset."));
         register("checkbox",
                 attr("icon", "Icon path rendered next to the checkbox label."),
@@ -82,7 +88,9 @@ final class BeuHtmlWidgets {
                 attr("extensions", "File input: allowed extensions list."),
                 attr("show-size", "File input: show selected file size."),
                 attr("required", "Marks the input as required."),
-                attr("value", "Current input value.")
+                attr("value", "Current input value."),
+                attr("format", "which date format to use for date inputs: dd.mm.yyyy"),
+                attr("max-size", "File input: maximum allowed file size in KB | MB | GB.")
         );
         register("date-picker",
                 attr("id", "Element id."),
@@ -120,10 +128,16 @@ final class BeuHtmlWidgets {
                 attr("value", "Current scroll value.")
         );
         register("slider",
+                attr("id", "Element id."),
+                attr("type", "Slider type, e.g. range."),
                 attr("min", "Minimum slider value."),
                 attr("max", "Maximum slider value."),
                 attr("value", "Current slider value."),
-                attr("step", "Slider step size.")
+                attr("step", "Slider step size."),
+                attr("dots", "Number of visible slider dots."),
+                attr("show-labels", "Show value labels for slider steps."),
+                attr("dot-anchor", "Dot/label anchor position, e.g. bottom."),
+                attr("onchange", "Handler called when slider value changes.")
         );
         register("colorpicker",
                 attr("value", "Initial color value (#hex, rgb(), or rgba())."),
@@ -145,6 +159,11 @@ final class BeuHtmlWidgets {
         register("label", attr("for", "Target input id."));
         register("icon", attr("src", "Icon source path."));
         register("listbox");
+        register("dialog",
+                attr("trigger", "Which element triggers the dialog. (id)"),
+                attr("renderer", "Use bevy-app or system for rendering the dialog content."),
+                attr("type", "Which type info | warn | error or blank")
+        );
     }
 
     private static void register(String tag, AttributeDefinition... attributes) {

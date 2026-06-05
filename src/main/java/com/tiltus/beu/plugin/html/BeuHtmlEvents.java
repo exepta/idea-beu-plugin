@@ -126,6 +126,35 @@ public final class BeuHtmlEvents {
         return normalized.startsWith("on") || "action".equals(normalized);
     }
 
+    public static String rustEventTypeForAttribute(String attributeName) {
+        EventDefinition definition = resolve(attributeName);
+        if (definition == null) {
+            return null;
+        }
+        return switch (definition.name()) {
+            case "onclick" -> "HtmlClick";
+            case "onmousedown" -> "HtmlMouseDown";
+            case "onmouseup" -> "HtmlMouseUp";
+            case "onmouseover" -> "HtmlMouseOver";
+            case "onmouseout" -> "HtmlMouseOut";
+            case "onchange" -> "HtmlChange";
+            case "action" -> "HtmlSubmit";
+            case "oninit" -> "HtmlInit";
+            case "onfocus" -> "HtmlFocus";
+            case "onscroll" -> "HtmlScroll";
+            case "onwheel" -> "HtmlWheel";
+            case "onkeydown" -> "HtmlKeyDown";
+            case "onkeyup" -> "HtmlKeyUp";
+            case "ondragstart" -> "HtmlDragStart";
+            case "ondrag" -> "HtmlDrag";
+            case "ondragstop" -> "HtmlDragStop";
+            case "ontouchstart" -> "HtmlTouchStart";
+            case "ontouchmove" -> "HtmlTouchMove";
+            case "ontouchend" -> "HtmlTouchEnd";
+            default -> null;
+        };
+    }
+
     private static String normalize(String input) {
         String normalized = input.toLowerCase(Locale.ROOT).trim();
         if (normalized.startsWith("on:") && normalized.length() > 3) {

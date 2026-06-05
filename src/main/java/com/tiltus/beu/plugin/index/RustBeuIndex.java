@@ -2,12 +2,14 @@ package com.tiltus.beu.plugin.index;
 
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.newvfs.BulkFileListener;
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiSearchHelper;
@@ -467,14 +469,36 @@ public final class RustBeuIndex {
     }
 
     public List<String> htmlFunctionNames() {
-        return List.copyOf(snapshot.htmlFunctions.keySet());
+        Map<String, List<HtmlFunctionTarget>> liveFunctionTargets = new LinkedHashMap<>();
+        boolean needsRescan = false;
+        for (Map.Entry<String, List<HtmlFunctionTarget>> entry : snapshot.htmlFunctions.entrySet()) {
+            String functionName = entry.getKey();
+            List<HtmlFunctionTarget> validated = validateHtmlFunctionTargets(functionName, entry.getValue());
+            if (!validated.isEmpty()) {
+                liveFunctionTargets.put(functionName, validated);
+            } else {
+                needsRescan = true;
+            }
+        }
+        if (liveFunctionTargets.isEmpty() || needsRescan) {
+            liveFunctionTargets.putAll(scanHtmlFunctionsByName());
+        }
+        return List.copyOf(liveFunctionTargets.keySet());
     }
 
     public List<HtmlFunctionTarget> htmlFunctionTargets(String functionName) {
         if (functionName == null || functionName.isBlank()) {
             return List.of();
         }
-        List<HtmlFunctionTarget> targets = snapshot.htmlFunctions.get(functionName.toLowerCase(Locale.ROOT));
+        String normalizedName = functionName.toLowerCase(Locale.ROOT);
+        List<HtmlFunctionTarget> snapshotTargets = snapshot.htmlFunctions.get(normalizedName);
+        List<HtmlFunctionTarget> validatedTargets = validateHtmlFunctionTargets(normalizedName, snapshotTargets);
+        if (!validatedTargets.isEmpty()) {
+            return validatedTargets;
+        }
+
+        Map<String, List<HtmlFunctionTarget>> scanned = scanHtmlFunctionsByName();
+        List<HtmlFunctionTarget> targets = scanned.get(normalizedName);
         return targets == null ? List.of() : targets;
     }
 
@@ -1068,11 +1092,68 @@ public final class RustBeuIndex {
     }
 
     private static String loadText(VirtualFile file) {
+        Document document = FileDocumentManager.getInstance().getCachedDocument(file);
+        if (document != null) {
+            return document.getText();
+        }
         try {
             return VfsUtilCore.loadText(file);
         } catch (IOException ignored) {
             return null;
         }
+    }
+
+    private List<HtmlFunctionTarget> validateHtmlFunctionTargets(String normalizedFunctionName, List<HtmlFunctionTarget> snapshotTargets) {
+        if (snapshotTargets == null || snapshotTargets.isEmpty()) {
+            return List.of();
+        }
+
+        List<HtmlFunctionTarget> validated = new ArrayList<>();
+        for (HtmlFunctionTarget target : snapshotTargets) {
+            VirtualFile file = target.file();
+            String text = loadText(file);
+            if (text == null || text.isBlank() || !text.contains("#[html_fn(")) {
+                continue;
+            }
+
+            Matcher matcher = HTML_FN_PATTERN.matcher(text);
+            while (matcher.find()) {
+                String rawName = matcher.group("htmlQuoted");
+                if (rawName == null || rawName.isBlank()) {
+                    rawName = matcher.group("html");
+                }
+                if (rawName == null || rawName.isBlank()) {
+                    continue;
+                }
+                if (!normalizedFunctionName.equals(rawName.toLowerCase(Locale.ROOT))) {
+                    continue;
+                }
+                int fnOffset = matcher.start("fn");
+                if (fnOffset == target.offset()) {
+                    validated.add(target);
+                    break;
+                }
+            }
+        }
+        return List.copyOf(validated);
+    }
+
+    private Map<String, List<HtmlFunctionTarget>> scanHtmlFunctionsByName() {
+        Map<String, List<HtmlFunctionTarget>> targetMap = new LinkedHashMap<>();
+        List<VirtualFile> files = collectSnapshotFiles(project);
+        for (VirtualFile file : files) {
+            String text = loadText(file);
+            if (text == null || text.isBlank() || !text.contains("#[html_fn(")) {
+                continue;
+            }
+            collectHtmlFunctions(text, file, targetMap);
+        }
+
+        Map<String, List<HtmlFunctionTarget>> immutable = new LinkedHashMap<>();
+        for (Map.Entry<String, List<HtmlFunctionTarget>> entry : targetMap.entrySet()) {
+            immutable.put(entry.getKey(), List.copyOf(entry.getValue()));
+        }
+        return Map.copyOf(immutable);
     }
 
     private static String normalizePath(String path) {

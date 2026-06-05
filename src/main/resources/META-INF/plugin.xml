@@ -28,7 +28,16 @@
         <psi.referenceContributor language="XML" implementation="com.tiltus.beu.plugin.references.BeuHtmlFnReferenceContributor"/>
         <psi.referenceContributor language="HTML" implementation="com.tiltus.beu.plugin.references.BeuHtmlStructReferenceContributor"/>
         <psi.referenceContributor language="XML" implementation="com.tiltus.beu.plugin.references.BeuHtmlStructReferenceContributor"/>
+        <localInspection language="HTML"
+                         shortName="BeuMissingEventHandler"
+                         displayName="Missing BeU event handler"
+                         groupName="BeU HTML"
+                         enabledByDefault="true"
+                         level="WARNING"
+                         implementationClass="com.tiltus.beu.plugin.html.BeuHtmlMissingEventHandlerInspection"/>
         <lang.inspectionSuppressor language="HTML" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlInspectionSuppressor"/>
+        <lang.inspectionSuppressor language="CSS" implementationClass="com.tiltus.beu.plugin.html.BeuHtmlInspectionSuppressor"/>
+        <highlightErrorFilter implementation="com.tiltus.beu.plugin.html.BeuHtmlHighlightErrorFilter"/>
         <directoryProjectGenerator implementation="com.tiltus.beu.plugin.project.BevyDirectoryProjectGenerator"/>
         <newProjectWizard.languageGenerator implementation="com.tiltus.beu.plugin.project.BevyNewProjectWizard"/>
     </extensions>
