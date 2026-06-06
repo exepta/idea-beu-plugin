@@ -21,7 +21,7 @@ public final class BeuHtmlAnnotator implements Annotator {
     );
     private static final Pattern OBJECT_ATTRIBUTE_PATTERN = Pattern.compile("\\b([A-Za-z_][\\w]*)\\.([A-Za-z_][\\w]*)\\b");
     private static final Pattern ENUM_VARIANT_PATTERN = Pattern.compile("\\b[A-Z][\\w]*::([A-Z][\\w]*)\\b");
-    private static final Pattern TEMPLATE_HELPER_PATTERN = Pattern.compile("\\$(?:set|event)\\b");
+    private static final Pattern TEMPLATE_HELPER_PATTERN = Pattern.compile("\\$(?:set|add|min|event)\\b");
     private static final Pattern TEMPLATE_CALL_PATTERN = Pattern.compile("\\$[A-Za-z_][\\w]*\\s*\\(([^\\r\\n]*)\\)");
 
     @Override

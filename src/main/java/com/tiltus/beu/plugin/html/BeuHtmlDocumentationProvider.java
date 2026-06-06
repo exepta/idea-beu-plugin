@@ -21,6 +21,12 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
     private static final String TEMPLATE_SET_DOC = """
             With this method, you can easily and quickly modify a value and react directly to the event. If you are planning something more substantial, please use the `#[html_fn()]` macro to register your own system within Bevy!
             """;
+    private static final String TEMPLATE_ADD_DOC = """
+            With this method, you can add a value directly to the current target value and react to the event in one step. For larger workflows, use `#[html_fn()]` to implement a custom system.
+            """;
+    private static final String TEMPLATE_MIN_DOC = """
+            With this method, you can subtract a value directly from the current target value and react to the event in one step. For larger workflows, use `#[html_fn()]` to implement a custom system.
+            """;
     private static final String TEMPLATE_EVENT_DOC = """
             This is used to directly access the event within the `$set` method. This is necessary to retrieve the element's value or other values.
             """;
@@ -541,7 +547,7 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
 
         String token = text.substring(tokenStart, tokenEnd);
         return switch (token) {
-            case "$set", "$event" -> token;
+            case "$set", "$add", "$min", "$event" -> token;
             default -> null;
         };
     }
@@ -549,6 +555,12 @@ public final class BeuHtmlDocumentationProvider extends AbstractDocumentationPro
     private static String templateHelperDoc(String helperToken) {
         if ("$set".equals(helperToken)) {
             return TEMPLATE_SET_DOC;
+        }
+        if ("$add".equals(helperToken)) {
+            return TEMPLATE_ADD_DOC;
+        }
+        if ("$min".equals(helperToken)) {
+            return TEMPLATE_MIN_DOC;
         }
         if ("$event".equals(helperToken)) {
             return TEMPLATE_EVENT_DOC;
