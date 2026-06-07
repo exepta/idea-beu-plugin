@@ -10,6 +10,7 @@ public record BevyProjectSettings(
         String bevyExtendedUiVersion,
         List<String> bevyExtendedUiFeatures,
         List<BevyAssetSelection> selectedAssets,
+        boolean useRouting,
         String registryFileName
 ) {
     public BevyProjectSettings {

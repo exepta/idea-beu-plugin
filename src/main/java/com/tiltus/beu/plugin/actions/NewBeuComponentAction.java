@@ -21,24 +21,42 @@ import com.intellij.psi.search.FilenameIndex;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.ui.components.JBList;
+import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTextField;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.DefaultListModel;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
+import javax.swing.ListSelectionModel;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class NewBeuComponentAction extends AnAction {
+    private static final String ASSETS_COMPONENTS_SEGMENT = "/assets/components/";
+    private static final Pattern MOD_LINE_PATTERN = Pattern.compile("(?m)^\\s*mod\\s+[A-Za-z_][A-Za-z0-9_]*\\s*;\\s*$");
+    private static final Pattern USE_LINE_PATTERN = Pattern.compile("(?m)^\\s*use\\s+.+;\\s*$");
+
     @Override
     public void update(@NotNull AnActionEvent event) {
         Project project = event.getProject();
@@ -55,6 +73,23 @@ public final class NewBeuComponentAction extends AnAction {
             return;
         }
 
+        SelectGenerateTargetDialog selectGenerateTargetDialog = new SelectGenerateTargetDialog(project);
+        if (!selectGenerateTargetDialog.showAndGet()) {
+            return;
+        }
+        GenerateTarget generateTarget = selectGenerateTargetDialog.selectedTarget();
+        if (generateTarget == null) {
+            return;
+        }
+
+        if (generateTarget == GenerateTarget.COMPONENT) {
+            generateComponent(project, targetDirectory);
+            return;
+        }
+        generateRoutes(project, targetDirectory);
+    }
+
+    private static void generateComponent(Project project, PsiDirectory targetDirectory) {
         String defaultRegistryPath = resolveDefaultRegistryPath(project, targetDirectory);
         CreateBeuComponentDialog dialog = new CreateBeuComponentDialog(project, defaultRegistryPath);
         if (!dialog.showAndGet()) {
@@ -84,6 +119,28 @@ public final class NewBeuComponentAction extends AnAction {
             });
         } catch (IllegalArgumentException error) {
             Messages.showErrorDialog(project, error.getMessage(), "Could not create beu component");
+        }
+    }
+
+    private static void generateRoutes(Project project, PsiDirectory targetDirectory) {
+        CreateBeuRoutesDialog dialog = new CreateBeuRoutesDialog(project, findExistingRoutesFiles(project));
+        if (!dialog.showAndGet()) {
+            return;
+        }
+
+        ParsedComponentPath parsedComponentPath = parseComponentPathInput(dialog.routeInput());
+        if (parsedComponentPath == null) {
+            Messages.showErrorDialog(project, "Please enter a valid routes name.", "Invalid beu routes name");
+            return;
+        }
+
+        try {
+            WriteCommandAction.runWriteCommandAction(project, () -> {
+                CreatedRoutes createdRoutes = createRoutesFile(targetDirectory, parsedComponentPath);
+                appendRoutesModuleEntry(project, targetDirectory, dialog.selectedRoutesContainerPath(), createdRoutes.routesFile());
+            });
+        } catch (IllegalArgumentException error) {
+            Messages.showErrorDialog(project, error.getMessage(), "Could not create beu routes");
         }
     }
 
@@ -149,6 +206,210 @@ public final class NewBeuComponentAction extends AnAction {
         targetDirectory.createFile(htmlFileName);
         targetDirectory.createFile(cssFileName);
         return new CreatedComponent(componentName, rustFile.getVirtualFile());
+    }
+
+    private static CreatedRoutes createRoutesFile(PsiDirectory baseDirectory, ParsedComponentPath parsedComponentPath) {
+        PsiDirectory targetDirectory = baseDirectory;
+        for (String directoryName : parsedComponentPath.targetDirectories()) {
+            PsiDirectory existingSubdirectory = targetDirectory.findSubdirectory(directoryName);
+            targetDirectory = existingSubdirectory != null ? existingSubdirectory : targetDirectory.createSubdirectory(directoryName);
+        }
+
+        String routeName = parsedComponentPath.componentBaseName();
+        String routesFileName = routeName + ".routes.rs";
+        ensureMissing(targetDirectory.findFile(routesFileName), routesFileName);
+
+        PsiFile routesFile = targetDirectory.createFile(routesFileName);
+        try {
+            VfsUtil.saveText(routesFile.getVirtualFile(), buildRoutesFile(routeName));
+        } catch (Exception error) {
+            throw new IllegalArgumentException("Could not write file: " + routesFileName);
+        }
+        return new CreatedRoutes(routeName, routesFile.getVirtualFile());
+    }
+
+    private static void appendRoutesModuleEntry(Project project,
+                                                PsiDirectory targetDirectory,
+                                                String selectedContainerRelativePath,
+                                                VirtualFile createdRoutesFile) {
+        if (selectedContainerRelativePath == null || selectedContainerRelativePath.isBlank()) {
+            return;
+        }
+
+        VirtualFile routesContainerFile = resolveOrCreateRoutesContainerFile(project, targetDirectory, selectedContainerRelativePath);
+        if (routesContainerFile == null || routesContainerFile.isDirectory()) {
+            throw new IllegalArgumentException("Routes container file not found: " + selectedContainerRelativePath);
+        }
+        if (!routesContainerFile.isWritable()) {
+            throw new IllegalArgumentException("Routes container file is not writable: " + routesContainerFile.getPath());
+        }
+        if (routesContainerFile.getPath().equals(createdRoutesFile.getPath())) {
+            return;
+        }
+
+        String relativePath = relativeComponentPath(routesContainerFile, createdRoutesFile);
+        String modName = toSnakeIdentifier(removeTrailingRs(createdRoutesFile.getName()));
+        String modLine = "mod " + modName + ";";
+        String moduleSnippet = "#[path = \"" + relativePath + "\"]\n" + modLine + "\n";
+
+        Document document = FileDocumentManager.getInstance().getDocument(routesContainerFile);
+        if (document == null) {
+            throw new IllegalArgumentException("Could not open routes container file: " + routesContainerFile.getPath());
+        }
+        String text = document.getText();
+        if (text.contains(modLine)) {
+            return;
+        }
+
+        int insertionOffset = resolveRoutesInsertionOffset(text);
+        String prefix = insertionOffset > 0 ? "\n\n" : "";
+        String updatedText = text.substring(0, insertionOffset) + prefix + moduleSnippet + text.substring(insertionOffset);
+        document.setText(updatedText);
+        PsiDocumentManager.getInstance(project).commitDocument(document);
+        FileDocumentManager.getInstance().saveDocument(document);
+    }
+
+    private static int resolveRoutesInsertionOffset(String text) {
+        int lastModEnd = -1;
+        Matcher modMatcher = MOD_LINE_PATTERN.matcher(text);
+        while (modMatcher.find()) {
+            lastModEnd = modMatcher.end();
+        }
+        if (lastModEnd >= 0) {
+            return lastModEnd;
+        }
+
+        int lastUseEnd = -1;
+        Matcher useMatcher = USE_LINE_PATTERN.matcher(text);
+        while (useMatcher.find()) {
+            lastUseEnd = useMatcher.end();
+        }
+        return Math.max(lastUseEnd, 0);
+    }
+
+    private static @Nullable VirtualFile resolveOrCreateRoutesContainerFile(Project project,
+                                                                            PsiDirectory targetDirectory,
+                                                                            String relativePath) {
+        VirtualFile assetsComponentsRoot = resolveAssetsComponentsRoot(project, targetDirectory);
+        if (assetsComponentsRoot == null) {
+            return null;
+        }
+
+        String normalizedPath = relativePath.trim().replace('\\', '/').replaceAll("/+", "/");
+        if (normalizedPath.startsWith("/") || normalizedPath.endsWith("/")) {
+            throw new IllegalArgumentException("Invalid routes container path: " + relativePath);
+        }
+        String[] segments = normalizedPath.split("/");
+        if (segments.length == 0) {
+            throw new IllegalArgumentException("Invalid routes container path: " + relativePath);
+        }
+
+        VirtualFile currentDirectory = assetsComponentsRoot;
+        for (int i = 0; i < segments.length - 1; i++) {
+            String segment = segments[i].trim();
+            if (!isValidPathSegment(segment)) {
+                throw new IllegalArgumentException("Invalid routes container path: " + relativePath);
+            }
+            VirtualFile childDirectory = currentDirectory.findChild(segment);
+            if (childDirectory == null) {
+                try {
+                    childDirectory = currentDirectory.createChildDirectory(NewBeuComponentAction.class, segment);
+                } catch (Exception error) {
+                    throw new IllegalArgumentException("Could not create directory: " + segment);
+                }
+            }
+            currentDirectory = childDirectory;
+        }
+
+        String fileName = segments[segments.length - 1].trim();
+        if (!isValidPathSegment(fileName) || !fileName.endsWith(".routes.rs")) {
+            throw new IllegalArgumentException("Invalid routes container file: " + relativePath);
+        }
+
+        VirtualFile containerFile = currentDirectory.findChild(fileName);
+        if (containerFile == null) {
+            try {
+                containerFile = currentDirectory.createChildData(NewBeuComponentAction.class, fileName);
+                VfsUtil.saveText(containerFile, buildRoutesFile(removeRoutesFileSuffix(fileName)));
+            } catch (Exception error) {
+                throw new IllegalArgumentException("Could not create routes container file: " + relativePath);
+            }
+        }
+        return containerFile;
+    }
+
+    private static @Nullable VirtualFile resolveAssetsComponentsRoot(Project project, PsiDirectory targetDirectory) {
+        VirtualFile current = targetDirectory.getVirtualFile();
+        while (current != null) {
+            String path = current.getPath().replace('\\', '/');
+            if (path.endsWith("/assets/components")) {
+                return current;
+            }
+            current = current.getParent();
+        }
+
+        String projectBasePath = project.getBasePath();
+        if (projectBasePath == null || projectBasePath.isBlank()) {
+            return null;
+        }
+        String rootPath = Paths.get(projectBasePath, "assets", "components").toString().replace('\\', '/');
+        VirtualFile root = LocalFileSystem.getInstance().refreshAndFindFileByPath(rootPath);
+        if (root != null) {
+            return root;
+        }
+
+        VirtualFile assetsDir = LocalFileSystem.getInstance()
+                .refreshAndFindFileByPath(Paths.get(projectBasePath, "assets").toString().replace('\\', '/'));
+        if (assetsDir == null) {
+            try {
+                VirtualFile projectRoot = LocalFileSystem.getInstance().refreshAndFindFileByPath(projectBasePath.replace('\\', '/'));
+                if (projectRoot != null) {
+                    assetsDir = projectRoot.createChildDirectory(NewBeuComponentAction.class, "assets");
+                }
+            } catch (Exception error) {
+                throw new IllegalArgumentException("Could not create assets/components directory.");
+            }
+        }
+        if (assetsDir == null) {
+            return null;
+        }
+        try {
+            VirtualFile componentsDir = assetsDir.findChild("components");
+            if (componentsDir == null) {
+                componentsDir = assetsDir.createChildDirectory(NewBeuComponentAction.class, "components");
+            }
+            return componentsDir;
+        } catch (Exception error) {
+            throw new IllegalArgumentException("Could not create assets/components directory.");
+        }
+    }
+
+    private static List<String> findExistingRoutesFiles(Project project) {
+        Collection<VirtualFile> rustFiles = FilenameIndex.getAllFilesByExt(project, "rs", GlobalSearchScope.projectScope(project));
+        Set<String> collectedPaths = new LinkedHashSet<>();
+        for (VirtualFile rustFile : rustFiles) {
+            if (rustFile.isDirectory()) {
+                continue;
+            }
+            String fullPath = rustFile.getPath().replace('\\', '/');
+            if (!fullPath.endsWith(".routes.rs")) {
+                continue;
+            }
+            int markerIndex = fullPath.indexOf(ASSETS_COMPONENTS_SEGMENT);
+            if (markerIndex < 0) {
+                continue;
+            }
+            String relativePath = fullPath.substring(markerIndex + ASSETS_COMPONENTS_SEGMENT.length());
+            if (!relativePath.isBlank()) {
+                collectedPaths.add(relativePath);
+            }
+        }
+        List<String> paths = new ArrayList<>(collectedPaths);
+        Collections.sort(paths);
+        if (!paths.contains("beu.routes.rs")) {
+            paths.add(0, "beu.routes.rs");
+        }
+        return paths;
     }
 
     private static void appendRegistryEntry(Project project, String registryFilePathInput, CreatedComponent createdComponent) {
@@ -340,6 +601,27 @@ public final class NewBeuComponentAction extends AnAction {
                 "}\n";
     }
 
+    private static String buildRoutesFile(String routeName) {
+        if ("beu".equalsIgnoreCase(routeName)) {
+            return "use bevy_extended_ui::routing::Routes;\n" +
+                    "use bevy_extended_ui_macros::beu_routes;\n" +
+                    "\n" +
+                    "#[beu_routes]\n" +
+                    "pub fn routes() -> Routes {\n" +
+                    "    Routes::new()\n" +
+                    "        .route(\"/\", \"app-main\")\n" +
+                    "        .redirect(\"\", \"/\")\n" +
+                    "        .fallback(\"app-main\")\n" +
+                    "}\n";
+        }
+        return "use bevy_extended_ui::routing::Routes;\n" +
+                "\n" +
+                "pub fn " + routeName + "() -> Routes {\n" +
+                    "    Routes::new()\n" +
+                    "        .route(\"/" + routeName + "\", \"\")\n" +
+                "}\n";
+    }
+
     private static String buildRegistrySnippet(String relativePath, String modName) {
         return "#[cfg(feature = \"extended-framework\")]\n" +
                 "#[allow(dead_code)]\n" +
@@ -459,10 +741,137 @@ public final class NewBeuComponentAction extends AnAction {
         return Character.isLetter(ch) || ch == '_';
     }
 
+    private static String removeTrailingRs(String fileName) {
+        if (fileName.endsWith(".rs")) {
+            return fileName.substring(0, fileName.length() - 3);
+        }
+        return fileName;
+    }
+
+    private static String removeRoutesFileSuffix(String fileName) {
+        if (fileName.endsWith(".routes.rs")) {
+            return fileName.substring(0, fileName.length() - ".routes.rs".length());
+        }
+        return removeTrailingRs(fileName);
+    }
+
+    private enum GenerateTarget {
+        COMPONENT("Component : {name}.component.rs | html | css"),
+        ROUTES("Routes : {name}.routes.rs");
+
+        private final String displayName;
+
+        GenerateTarget(String displayName) {
+            this.displayName = displayName;
+        }
+
+        private String displayName() {
+            return displayName;
+        }
+
+        @Override
+        public String toString() {
+            return displayName;
+        }
+    }
+
     private record CreatedComponent(String componentName, VirtualFile rustFile) {
     }
 
+    private record CreatedRoutes(String routeName, VirtualFile routesFile) {
+    }
+
     private record ParsedComponentPath(List<String> targetDirectories, String componentBaseName) {
+    }
+
+    private static final class SelectGenerateTargetDialog extends DialogWrapper {
+        private final JBTextField searchField = new JBTextField();
+        private final DefaultListModel<GenerateTarget> listModel = new DefaultListModel<>();
+        private final JBList<GenerateTarget> optionsList = new JBList<>(listModel);
+
+        private SelectGenerateTargetDialog(Project project) {
+            super(project);
+            setTitle("Beu Generate");
+            init();
+            setOKActionEnabled(false);
+            refillList("");
+        }
+
+        @Override
+        protected @Nullable JComponent createCenterPanel() {
+            JPanel panel = new JPanel(new GridBagLayout());
+            GridBagConstraints constraints = new GridBagConstraints();
+            constraints.gridx = 0;
+            constraints.gridy = 0;
+            constraints.weightx = 1.0;
+            constraints.fill = GridBagConstraints.HORIZONTAL;
+            constraints.anchor = GridBagConstraints.WEST;
+            constraints.insets = new Insets(0, 0, 6, 0);
+            panel.add(new JBLabel("Select what to generate."), constraints);
+
+            constraints.gridy++;
+            panel.add(searchField, constraints);
+
+            constraints.gridy++;
+            constraints.weighty = 1.0;
+            constraints.fill = GridBagConstraints.BOTH;
+            constraints.insets = new Insets(6, 0, 0, 0);
+            optionsList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            panel.add(new JBScrollPane(optionsList), constraints);
+
+            searchField.getDocument().addDocumentListener(new DocumentListener() {
+                @Override
+                public void insertUpdate(DocumentEvent event) {
+                    refillList(searchField.getText());
+                }
+
+                @Override
+                public void removeUpdate(DocumentEvent event) {
+                    refillList(searchField.getText());
+                }
+
+                @Override
+                public void changedUpdate(DocumentEvent event) {
+                    refillList(searchField.getText());
+                }
+            });
+            optionsList.addListSelectionListener(event -> setOKActionEnabled(optionsList.getSelectedValue() != null));
+            optionsList.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseClicked(MouseEvent event) {
+                    if (event.getClickCount() == 2 && optionsList.getSelectedValue() != null) {
+                        doOKAction();
+                    }
+                }
+            });
+            return panel;
+        }
+
+        @Override
+        public @Nullable JComponent getPreferredFocusedComponent() {
+            return searchField;
+        }
+
+        private @Nullable GenerateTarget selectedTarget() {
+            return optionsList.getSelectedValue();
+        }
+
+        private void refillList(String query) {
+            String normalizedQuery = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+            listModel.clear();
+            for (GenerateTarget target : GenerateTarget.values()) {
+                String display = target.displayName().toLowerCase(Locale.ROOT);
+                if (normalizedQuery.isBlank() || display.contains(normalizedQuery)) {
+                    listModel.addElement(target);
+                }
+            }
+            if (!listModel.isEmpty()) {
+                optionsList.setSelectedIndex(0);
+                setOKActionEnabled(true);
+            } else {
+                setOKActionEnabled(false);
+            }
+        }
     }
 
     private static final class CreateBeuComponentDialog extends DialogWrapper {
@@ -518,6 +927,59 @@ public final class NewBeuComponentAction extends AnAction {
                 return defaultRegistryPath;
             }
             return registryPathField.getText().trim();
+        }
+    }
+
+    private static final class CreateBeuRoutesDialog extends DialogWrapper {
+        private final JBTextField routeNameField = new JBTextField();
+        private final JComboBox<String> routesContainerCombo;
+
+        private CreateBeuRoutesDialog(Project project, List<String> existingRoutesFiles) {
+            super(project);
+            setTitle("New Beu Routes");
+            routesContainerCombo = new JComboBox<>(existingRoutesFiles.toArray(new String[0]));
+            routesContainerCombo.setEditable(false);
+            routesContainerCombo.setSelectedItem("beu.routes.rs");
+            init();
+        }
+
+        @Override
+        protected @Nullable JComponent createCenterPanel() {
+            JPanel panel = new JPanel(new GridBagLayout());
+            GridBagConstraints constraints = new GridBagConstraints();
+            constraints.gridx = 0;
+            constraints.gridy = 0;
+            constraints.weightx = 1.0;
+            constraints.fill = GridBagConstraints.HORIZONTAL;
+            constraints.anchor = GridBagConstraints.WEST;
+            constraints.insets = new Insets(0, 0, 6, 0);
+
+            panel.add(new JBLabel("give your routes file a name."), constraints);
+
+            constraints.gridy++;
+            constraints.insets = new Insets(0, 0, 0, 0);
+            panel.add(routeNameField, constraints);
+
+            constraints.gridy++;
+            constraints.insets = new Insets(8, 0, 6, 0);
+            panel.add(new JBLabel("Routes container file."), constraints);
+
+            constraints.gridy++;
+            constraints.insets = new Insets(0, 0, 0, 0);
+            panel.add(routesContainerCombo, constraints);
+            return panel;
+        }
+
+        private String routeInput() {
+            return routeNameField.getText();
+        }
+
+        private String selectedRoutesContainerPath() {
+            Object selectedValue = routesContainerCombo.getSelectedItem();
+            if (selectedValue instanceof String value) {
+                return value.trim();
+            }
+            return "beu.routes.rs";
         }
     }
 }

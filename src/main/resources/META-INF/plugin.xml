@@ -7,10 +7,13 @@
         <p>RustRover plugin for Bevy and bevy_extended_ui workflows.</p>
         <ul>
             <li>Bevy New Project Wizard with version, feature, and asset selection.</li>
-            <li>Beu Component action in the project tree context menu.</li>
+            <li>Beu Generate action in the project tree context menu.</li>
             <li>HTML support for bevy_extended_ui templates (completion, docs, inspections, formatting).</li>
         </ul>
     ]]></description>
+    <change-notes><![CDATA[
+        First version.
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>
@@ -46,9 +49,9 @@
         <action
                 id="com.tiltus.beu.plugin.actions.NewBeuComponentAction"
                 class="com.tiltus.beu.plugin.actions.NewBeuComponentAction"
-                text="Beu Component"
+                text="Beu Generate"
                 icon="/icons/beuComponentPlus.svg"
-                description="Create a beu component">
+                description="Generate beu files">
             <add-to-group group-id="NewGroup" anchor="last"/>
         </action>
     </actions>

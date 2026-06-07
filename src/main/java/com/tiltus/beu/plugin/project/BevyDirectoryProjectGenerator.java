@@ -97,6 +97,7 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
             try {
                 String registryFileName = normalizeRegistryFileName(settings.registryFileName());
                 boolean shouldGenerateRegistryMarker = shouldCreateRegistryMarker(settings);
+                boolean shouldGenerateRouting = shouldGenerateRegistryMarker && settings.useRouting();
 
                 writeFile(baseDir, "Cargo.toml", buildCargoToml(baseDir.getName(), settings));
                 writeFile(baseDir, "src/main.rs", buildMainRs(settings.includeBevyExtendedUi(), shouldGenerateRegistryMarker, registryFileName));
@@ -110,9 +111,12 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
                 }
 
                 if (shouldGenerateRegistryMarker) {
-                    writeFile(baseDir, "src/" + registryFileName + ".rs", buildRegistryRs());
+                    writeFile(baseDir, "src/" + registryFileName + ".rs", buildRegistryRs(shouldGenerateRouting));
                     createMainComponentAssets(baseDir);
                     writeFile(baseDir, "assets/index.html", INDEX_HTML);
+                    if (shouldGenerateRouting) {
+                        writeFile(baseDir, "assets/components/beu.routes.rs", buildRoutesRs());
+                    }
                 }
             } catch (IOException error) {
                 throw new IllegalStateException("Failed to generate Bevy project files.", error);
@@ -198,7 +202,7 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
             trimmedName = trimmedName.substring(0, trimmedName.length() - 3);
         }
         if (trimmedName.isBlank()) {
-            return "beu_registry_marker";
+            return "beu_registry";
         }
 
         StringBuilder sanitizedName = new StringBuilder();
@@ -215,7 +219,7 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
         normalizedName = normalizedName.replaceAll("^_+", "");
         normalizedName = normalizedName.replaceAll("_+$", "");
         if (normalizedName.isBlank()) {
-            return "beu_registry_marker";
+            return "beu_registry";
         }
         return normalizedName;
     }
@@ -461,7 +465,7 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
         normalized = normalized.replaceAll("^_+", "");
         normalized = normalized.replaceAll("_+$", "");
         if (normalized.isBlank()) {
-            return "beu_registry_marker";
+            return "beu_registry";
         }
         if (Character.isDigit(normalized.charAt(0))) {
             return "mod_" + normalized;
@@ -494,13 +498,35 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
                 "}\n";
     }
 
-    private static String buildRegistryRs() {
-        return "use bevy_extended_ui_macros::beu_registry;\n\n" +
-                "#[beu_registry]\n" +
-                "mod beu_registry_marker {}\n\n" +
-                "#[allow(dead_code)]\n" +
-                "#[path = \"../assets/components/main.component.rs\"]\n" +
-                "mod main_component_mod;\n";
+    private static String buildRegistryRs(boolean includeRouting) {
+        StringBuilder registryBuilder = new StringBuilder();
+        registryBuilder.append("use bevy_extended_ui_macros::beu_registry;\n\n")
+                .append("#[beu_registry]\n")
+                .append("mod beu_registry_marker {}\n\n")
+                .append("#[allow(dead_code)]\n")
+                .append("#[path = \"../assets/components/main.component.rs\"]\n")
+                .append("mod main_component_mod;\n");
+        if (includeRouting) {
+            registryBuilder.append("\n")
+                    .append("#[cfg(feature = \"extended-framework\")]\n")
+                    .append("#[allow(dead_code)]\n")
+                    .append("#[path = \"../assets/components/beu.routes.rs\"]\n")
+                    .append("mod beu_routes;\n");
+        }
+        return registryBuilder.toString();
+    }
+
+    private static String buildRoutesRs() {
+        return "use bevy_extended_ui::routing::Routes;\n" +
+                "use bevy_extended_ui_macros::beu_routes;\n" +
+                "\n" +
+                "#[beu_routes]\n" +
+                "pub fn routes() -> Routes {\n" +
+                "    Routes::new()\n" +
+                "        .route(\"/\", \"app-main\")\n" +
+                "        .redirect(\"\", \"/\")\n" +
+                "        .fallback(\"app-main\")\n" +
+                "}\n";
     }
 
     private static String buildReadme(String directoryName, BevyProjectSettings settings) {
@@ -557,6 +583,9 @@ public final class BevyDirectoryProjectGenerator implements DirectoryProjectGene
                     .append("- `assets/components/main.component.rs`\n")
                     .append("- `assets/components/main.component.html`\n")
                     .append("- `assets/components/main.component.css`\n");
+            if (settings.useRouting()) {
+                readme.append("- `assets/components/beu.routes.rs`\n");
+            }
         }
 
         readme.append("\n")

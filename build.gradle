@@ -26,4 +26,11 @@ intellijPlatform {
             sinceBuild = '261'
         }
     }
+
+    pluginVerification {
+        ides {
+            // TODO: switch this back to RustRover once Plugin Verifier supports current RR layout.
+            create('IU', '2026.1')
+        }
+    }
 }
